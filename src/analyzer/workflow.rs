@@ -17,8 +17,7 @@ use std::collections::BTreeMap;
 impl Analyzer {
     pub(crate) fn convert_triggers(&mut self, triggers: Option<GithubTriggers>) -> NativeTriggers {
         let Some(triggers) = triggers else {
-            self.finding(
-                CompatibilityStatus::Unsupported,
+            self.unsupported(
                 "missing-trigger",
                 "on",
                 "the workflow has no statically declared trigger",
@@ -50,8 +49,7 @@ impl Analyzer {
                 }
                 "issue_comment" => {
                     native.issue_comment = Some(self.convert_webhook_trigger(&config, &path));
-                    self.finding(
-                        CompatibilityStatus::Supported,
+                    self.supported(
                         "issue-comment-trigger",
                         path,
                         "issue_comment maps to a bounded normalized repository event",
@@ -60,8 +58,7 @@ impl Analyzer {
                 }
                 "check_run" => {
                     native.check_run = Some(self.convert_webhook_trigger(&config, &path));
-                    self.finding(
-                        CompatibilityStatus::Supported,
+                    self.supported(
                         "check-run-trigger",
                         path,
                         "check_run maps to a bounded normalized repository event",
@@ -79,16 +76,14 @@ impl Analyzer {
                 "merge_group" => {
                     if is_null_or_empty_mapping(&config) {
                         native.merge_queue = Some(NativeEmpty {});
-                        self.finding(
-                            CompatibilityStatus::Supported,
+                        self.supported(
                             "merge-queue-trigger",
                             path,
                             "merge_group maps to the native merge queue trigger",
                             None,
                         );
                     } else {
-                        self.finding(
-                            CompatibilityStatus::Unsupported,
+                        self.unsupported(
                             "merge-group-options",
                             path,
                             "configured merge_group options are not implemented",
@@ -97,8 +92,7 @@ impl Analyzer {
                     }
                 }
                 "workflow_call" | "repository_dispatch" => {
-                    self.finding(
-                        CompatibilityStatus::RequiresGithub,
+                    self.requires_github(
                         "github-dispatch-api",
                         path,
                         format!("the `{name}` event depends on GitHub dispatch or reusable-workflow APIs"),
@@ -108,8 +102,7 @@ impl Analyzer {
                     );
                 }
                 _ => {
-                    self.finding(
-                        CompatibilityStatus::Unsupported,
+                    self.unsupported(
                         "unsupported-event",
                         path,
                         format!("the GitHub `{name}` event has no native mapping"),
@@ -132,8 +125,7 @@ impl Analyzer {
             return NativeWebhookTrigger::default();
         }
         let Some(mapping) = yaml_string_map(value) else {
-            self.finding(
-                CompatibilityStatus::Unsupported,
+            self.unsupported(
                 "invalid-webhook-trigger",
                 path,
                 "webhook trigger configuration must be a static mapping",
@@ -154,8 +146,7 @@ impl Analyzer {
                     );
                 }
             } else {
-                self.finding(
-                    CompatibilityStatus::Unsupported,
+                self.unsupported(
                     "unsupported-webhook-option",
                     format!("{path}.{key}"),
                     format!("webhook trigger option `{key}` has no native mapping"),
@@ -172,8 +163,7 @@ impl Analyzer {
         path: &str,
     ) -> NativeGitTrigger {
         if value.is_null() {
-            self.finding(
-                CompatibilityStatus::Supported,
+            self.supported(
                 "git-trigger",
                 path,
                 "GitHub git trigger maps to the native git trigger",
@@ -182,8 +172,7 @@ impl Analyzer {
             return NativeGitTrigger::default();
         }
         let Some(mapping) = yaml_string_map(value) else {
-            self.finding(
-                CompatibilityStatus::Unsupported,
+            self.unsupported(
                 "invalid-git-trigger",
                 path,
                 "git trigger configuration must be a static mapping",
@@ -205,8 +194,7 @@ impl Analyzer {
             if let Some(target) = target {
                 if let Some(values) = static_string_list(value) {
                     *target = values;
-                    self.finding(
-                        CompatibilityStatus::Supported,
+                    self.supported(
                         "git-trigger-filter",
                         format!("{path}.{key}"),
                         "static GitHub filter maps exactly to the native trigger filter",
@@ -220,8 +208,7 @@ impl Analyzer {
                     );
                 }
             } else {
-                self.finding(
-                    CompatibilityStatus::Unsupported,
+                self.unsupported(
                     "unsupported-trigger-option",
                     format!("{path}.{key}"),
                     format!("GitHub trigger option `{key}` has no native mapping"),
@@ -240,8 +227,7 @@ impl Analyzer {
         path: &str,
     ) -> Option<NativeManual> {
         if is_null_or_empty_mapping(value) {
-            self.finding(
-                CompatibilityStatus::Supported,
+            self.supported(
                 "manual-trigger",
                 path,
                 "workflow_dispatch maps to the native manual trigger",
@@ -252,8 +238,7 @@ impl Analyzer {
             });
         }
         let Some(mapping) = yaml_string_map(value) else {
-            self.finding(
-                CompatibilityStatus::Unsupported,
+            self.unsupported(
                 "invalid-manual-trigger",
                 path,
                 "workflow_dispatch configuration must be a static mapping",
@@ -264,8 +249,7 @@ impl Analyzer {
         let mut native_inputs = BTreeMap::new();
         for (field, field_value) in mapping {
             if field != "inputs" {
-                self.finding(
-                    CompatibilityStatus::Unsupported,
+                self.unsupported(
                     "unsupported-manual-option",
                     format!("{path}.{field}"),
                     format!("workflow_dispatch option `{field}` is not supported"),
@@ -274,8 +258,7 @@ impl Analyzer {
                 continue;
             }
             let Some(inputs) = yaml_string_map(field_value) else {
-                self.finding(
-                    CompatibilityStatus::Unsupported,
+                self.unsupported(
                     "invalid-manual-inputs",
                     format!("{path}.inputs"),
                     "manual inputs must be a static mapping",
@@ -307,8 +290,7 @@ impl Analyzer {
         path: &str,
     ) -> Option<NativeManualInput> {
         if !valid_identifier(input_name) {
-            self.finding(
-                CompatibilityStatus::Unsupported,
+            self.unsupported(
                 "invalid-input-name",
                 path,
                 "manual input name is not a native identifier",
@@ -317,8 +299,7 @@ impl Analyzer {
             return None;
         }
         let Some(mapping) = yaml_string_map(value) else {
-            self.finding(
-                CompatibilityStatus::Unsupported,
+            self.unsupported(
                 "invalid-manual-input",
                 path,
                 "manual input definition must be a static mapping",
@@ -334,8 +315,7 @@ impl Analyzer {
             match field.as_str() {
                 "description" => {
                     if static_string(field_value).is_some() {
-                        self.finding(
-                            CompatibilityStatus::Emulated,
+                        self.emulated(
                             "input-description",
                             format!("{path}.description"),
                             "input descriptions are report metadata and are not part of the native execution capsule",
@@ -361,16 +341,14 @@ impl Analyzer {
                     if matches!(value, "string" | "boolean" | "number" | "choice") {
                         value.clone_into(&mut kind);
                     } else if value == "environment" {
-                        self.finding(
-                            CompatibilityStatus::RequiresGithub,
+                        self.requires_github(
                             "github-environment-input",
                             format!("{path}.type"),
                             "environment inputs depend on GitHub Environment objects",
                             Some(format!("Change `{path}.type` to string and enforce environment policy natively.")),
                         );
                     } else {
-                        self.finding(
-                            CompatibilityStatus::Unsupported,
+                        self.unsupported(
                             "unsupported-input-type",
                             format!("{path}.type"),
                             format!("input type `{value}` is unsupported"),
@@ -409,8 +387,7 @@ impl Analyzer {
                         }
                     }
                 }
-                _ => self.finding(
-                    CompatibilityStatus::Unsupported,
+                _ => self.unsupported(
                     "unsupported-input-option",
                     format!("{path}.{field}"),
                     format!("manual input field `{field}` is unsupported"),
@@ -418,8 +395,7 @@ impl Analyzer {
                 ),
             }
         }
-        self.finding(
-            CompatibilityStatus::Supported,
+        self.supported(
             "manual-input",
             path,
             "static workflow_dispatch input maps to a native manual input",
@@ -439,8 +415,7 @@ impl Analyzer {
         path: &str,
     ) -> Vec<NativeSchedule> {
         let Some(entries) = value.as_sequence() else {
-            self.finding(
-                CompatibilityStatus::Unsupported,
+            self.unsupported(
                 "invalid-schedule",
                 path,
                 "schedule must be a static sequence of cron mappings",
@@ -452,8 +427,7 @@ impl Analyzer {
         for (index, entry) in entries.iter().enumerate() {
             let entry_path = format!("{path}[{index}]");
             let Some(mapping) = yaml_string_map(entry) else {
-                self.finding(
-                    CompatibilityStatus::Unsupported,
+                self.unsupported(
                     "invalid-schedule-entry",
                     entry_path,
                     "schedule entry must be a static mapping",
@@ -473,8 +447,7 @@ impl Analyzer {
                         );
                     }
                 } else {
-                    self.finding(
-                        CompatibilityStatus::Unsupported,
+                    self.unsupported(
                         "unsupported-schedule-option",
                         format!("{entry_path}.{field}"),
                         format!("schedule option `{field}` is unsupported"),
@@ -487,8 +460,7 @@ impl Analyzer {
                     cron,
                     timezone: "UTC".to_owned(),
                 });
-                self.finding(
-                    CompatibilityStatus::Supported,
+                self.supported(
                     "schedule-trigger",
                     entry_path,
                     "GitHub cron schedule maps to a native UTC schedule",
@@ -506,8 +478,7 @@ impl Analyzer {
         inherited: &PermissionState,
     ) -> PermissionState {
         let Some(permissions) = permissions else {
-            self.finding(
-                CompatibilityStatus::Emulated,
+            self.emulated(
                 "default-token-permissions",
                 path,
                 "GitHub's repository-dependent GITHUB_TOKEN defaults are replaced with native least privilege inferred from mapped steps",
@@ -519,8 +490,7 @@ impl Analyzer {
             let GithubPermissions::Keyword(keyword) = permissions else {
                 unreachable!()
             };
-            self.finding(
-                CompatibilityStatus::RequiresGithub,
+            self.requires_github(
                 "github-token-permission-set",
                 path,
                 format!("permission keyword `{keyword}` covers GitHub-specific token scopes"),
@@ -545,8 +515,7 @@ impl Analyzer {
                 _ => None,
             };
             let Some(access_value) = access_value else {
-                self.finding(
-                    CompatibilityStatus::Unsupported,
+                self.unsupported(
                     "invalid-permission-access",
                     format!("{path}.{scope}"),
                     format!("permission access `{access}` is unsupported"),
@@ -558,8 +527,7 @@ impl Analyzer {
                 "contents" => native.scm_contents = access_value,
                 "issues" => {
                     native.scm_issues = access_value;
-                    self.finding(
-                        CompatibilityStatus::Emulated,
+                    self.emulated(
                         "repository-mutation-permission",
                         format!("{path}.{scope}"),
                         format!(
@@ -570,8 +538,7 @@ impl Analyzer {
                 }
                 "pull-requests" => {
                     native.scm_pull_requests = access_value;
-                    self.finding(
-                        CompatibilityStatus::Emulated,
+                    self.emulated(
                         "repository-mutation-permission",
                         format!("{path}.{scope}"),
                         "GitHub `pull-requests` access is retained as an exact scoped provider capability",
@@ -591,15 +558,13 @@ impl Analyzer {
                         ast::Access::Deny | ast::Access::Read => ast::CacheWrite::Deny,
                     };
                 }
-                "id-token" => self.finding(
-                    CompatibilityStatus::RequiresGithub,
+                "id-token" => self.requires_github(
                     "github-oidc-token",
                     format!("{path}.{scope}"),
                     "GitHub OIDC claims cannot be translated to native OIDC without an explicit audience policy",
                     Some("Declare native OIDC audiences and replace GitHub claim assumptions.".to_owned()),
                 ),
-                _ => self.finding(
-                    CompatibilityStatus::RequiresGithub,
+                _ => self.requires_github(
                     "github-token-scope",
                     format!("{path}.{scope}"),
                     format!("GitHub token scope `{scope}` has no native capability equivalent"),
@@ -610,8 +575,7 @@ impl Analyzer {
                 scope.as_str(),
                 "contents" | "checks" | "statuses" | "packages" | "actions"
             ) {
-                self.finding(
-                    CompatibilityStatus::Supported,
+                self.supported(
                     "permission-mapping",
                     format!("{path}.{scope}"),
                     format!("GitHub `{scope}` access maps to a native least-privilege capability"),
@@ -631,8 +595,7 @@ impl Analyzer {
         for (name, value) in values {
             let value_path = format!("{path}.{name}");
             if !valid_environment_name(name) {
-                self.finding(
-                    CompatibilityStatus::Unsupported,
+                self.unsupported(
                     "invalid-env-name",
                     &value_path,
                     "environment variable name is not accepted by the native compiler",
@@ -643,8 +606,7 @@ impl Analyzer {
                 continue;
             }
             if looks_like_secret_name(name) && !is_empty_scalar(value) {
-                self.finding(
-                    CompatibilityStatus::Unsafe,
+                self.unsafe_finding(
                     "raw-secret-literal",
                     &value_path,
                     "a secret-like environment variable contains a raw workflow value",
@@ -655,8 +617,7 @@ impl Analyzer {
             }
             if let Some(converted) = self.convert_scalar(value, &value_path) {
                 result.insert(name.clone(), converted);
-                self.finding(
-                    CompatibilityStatus::Supported,
+                self.supported(
                     "static-environment",
                     value_path,
                     "static environment value maps to a native variable binding",
@@ -674,8 +635,7 @@ impl Analyzer {
     ) -> Option<String> {
         let value = value?;
         if has_secret_expression(&value) {
-            self.finding(
-                CompatibilityStatus::Unsafe,
+            self.unsafe_finding(
                 "raw-github-secret",
                 path,
                 "GitHub secret expressions cannot be copied into native workflow metadata",
@@ -683,8 +643,7 @@ impl Analyzer {
             );
             None
         } else if has_expression(&value) {
-            self.finding(
-                CompatibilityStatus::Unsupported,
+            self.unsupported(
                 "dynamic-display-name",
                 path,
                 "dynamic GitHub display names are not statically importable",
@@ -692,8 +651,7 @@ impl Analyzer {
             );
             None
         } else if value.contains('\0') {
-            self.finding(
-                CompatibilityStatus::Unsupported,
+            self.unsupported(
                 "nul-value",
                 path,
                 "display name contains a NUL byte",
@@ -715,8 +673,7 @@ impl Analyzer {
                     match i64::try_from(value) {
                         Ok(value) => Some(ast::Scalar::Integer(value)),
                         Err(_) => {
-                            self.finding(
-                                CompatibilityStatus::Unsupported,
+                            self.unsupported(
                                 "integer-range",
                                 path,
                                 "integer is outside the native signed 64-bit range",
@@ -731,8 +688,7 @@ impl Analyzer {
             }
             YamlValue::String(value) => {
                 if has_secret_expression(value) {
-                    self.finding(
-                        CompatibilityStatus::Unsafe,
+                    self.unsafe_finding(
                         "raw-github-secret",
                         path,
                         "GitHub secret expressions cannot be copied into native workflow data",
@@ -743,8 +699,7 @@ impl Analyzer {
                     );
                     None
                 } else if has_expression(value) {
-                    self.finding(
-                        CompatibilityStatus::Unsupported,
+                    self.unsupported(
                         "dynamic-expression",
                         path,
                         "dynamic GitHub expression is not statically importable",
@@ -754,8 +709,7 @@ impl Analyzer {
                     );
                     None
                 } else if value.contains('\0') {
-                    self.finding(
-                        CompatibilityStatus::Unsupported,
+                    self.unsupported(
                         "nul-value",
                         path,
                         "string contains a NUL byte",
@@ -767,8 +721,7 @@ impl Analyzer {
                 }
             }
             _ => {
-                self.finding(
-                    CompatibilityStatus::Unsupported,
+                self.unsupported(
                     "non-scalar-value",
                     path,
                     "native environment and matrix values must be scalar",

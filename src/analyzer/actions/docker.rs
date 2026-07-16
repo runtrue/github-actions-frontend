@@ -2,7 +2,6 @@ use super::{ActionMapping, Analyzer, JobEffects};
 use crate::{
     analyzer::{has_expression, looks_like_secret_name, static_bool, static_string},
     native::{NativeCommand, NativeRun},
-    report::CompatibilityStatus,
     validation::{normalize_relative, safe_relative_path},
 };
 use serde_yaml::Value as YamlValue;
@@ -30,8 +29,7 @@ impl Analyzer {
                     if value == "." || safe_relative_path(&value, false) {
                         context = value;
                     } else {
-                        self.finding(
-                            CompatibilityStatus::Unsafe,
+                        self.unsafe_finding(
                             "unsafe-build-context",
                             input_path,
                             "Docker build context must stay within the repository",
@@ -47,8 +45,7 @@ impl Analyzer {
                     if safe_relative_path(&value, false) {
                         dockerfile = normalize_relative(&value);
                     } else {
-                        self.finding(
-                            CompatibilityStatus::Unsafe,
+                        self.unsafe_finding(
                             "unsafe-dockerfile-path",
                             input_path,
                             "Dockerfile path must stay within the repository",
@@ -58,8 +55,7 @@ impl Analyzer {
                 }
                 "push" => match static_bool(value) {
                     Some(false) => {}
-                    Some(true) => self.finding(
-                        CompatibilityStatus::RequiresGithub,
+                    Some(true) => self.requires_github(
                         "docker-registry-push",
                         input_path,
                         "pushing build output needs explicit native registry credentials and destination policy",
@@ -69,8 +65,7 @@ impl Analyzer {
                 },
                 "load" => match static_bool(value) {
                     Some(false) => {}
-                    Some(true) => self.finding(
-                        CompatibilityStatus::Unsupported,
+                    Some(true) => self.unsupported(
                         "docker-load",
                         input_path,
                         "loading into a mutable Docker daemon is not available in the isolated BuildKit mapping",
@@ -102,8 +97,7 @@ impl Analyzer {
                     for argument in value.lines().map(str::trim).filter(|line| !line.is_empty()) {
                         let key = argument.split('=').next().unwrap_or_default();
                         if has_expression(argument) || looks_like_secret_name(key) {
-                            self.finding(
-                                CompatibilityStatus::Unsafe,
+                            self.unsafe_finding(
                                 "secret-or-dynamic-build-arg",
                                 &input_path,
                                 format!("build argument `{key}` is secret-like or dynamic"),
@@ -117,8 +111,7 @@ impl Analyzer {
                 }
                 "tags" | "labels" | "annotations" => {
                     if static_string(value).is_some() {
-                        self.finding(
-                            CompatibilityStatus::Emulated,
+                        self.emulated(
                             "build-metadata",
                             input_path,
                             format!("Docker `{input}` metadata is not a published object until a protected native publish step consumes the build result"),
@@ -135,8 +128,7 @@ impl Analyzer {
                 },
                 "pull" => {
                     if static_bool(value).is_some() {
-                        self.finding(
-                            CompatibilityStatus::Emulated,
+                        self.emulated(
                             "build-pull-policy",
                             input_path,
                             "native BuildKit resolves base images under runner/network policy rather than GitHub's pull flag",
@@ -155,8 +147,7 @@ impl Analyzer {
                         extra_args.push("--opt".to_owned());
                         extra_args.push("network=none".to_owned());
                     } else {
-                        self.finding(
-                            CompatibilityStatus::Unsafe,
+                        self.unsafe_finding(
                             "docker-build-network",
                             input_path,
                             "Docker build network access cannot be inferred or passed through safely",
@@ -165,8 +156,7 @@ impl Analyzer {
                     }
                 }
                 "secrets" | "secret-files" | "ssh" => {
-                    self.finding(
-                        CompatibilityStatus::Unsafe,
+                    self.unsafe_finding(
                         "docker-build-secret",
                         input_path,
                         format!("Docker build input `{input}` can expose credentials to build instructions"),
@@ -174,8 +164,7 @@ impl Analyzer {
                     );
                 }
                 "cache-from" | "cache-to" => {
-                    self.finding(
-                        CompatibilityStatus::Unsupported,
+                    self.unsupported(
                         "docker-cache-backend",
                         input_path,
                         "external Buildx cache backends do not map to native trust-scoped BuildKit snapshots",
@@ -183,8 +172,7 @@ impl Analyzer {
                     );
                 }
                 "outputs" => {
-                    self.finding(
-                        CompatibilityStatus::Unsupported,
+                    self.unsupported(
                         "docker-custom-output",
                         input_path,
                         "custom Buildx output exporters require an explicit native artifact/registry mapping",
@@ -193,8 +181,7 @@ impl Analyzer {
                 }
                 "provenance" | "sbom" => {
                     if static_string(value).is_some() {
-                        self.finding(
-                            CompatibilityStatus::Emulated,
+                        self.emulated(
                             "native-build-attestation",
                             input_path,
                             format!("`{input}` is replaced by Runtrue's capsule-bound attestation pipeline"),
@@ -208,15 +195,13 @@ impl Analyzer {
                         );
                     }
                 }
-                "github-token" => self.finding(
-                    CompatibilityStatus::Unsafe,
+                "github-token" => self.unsafe_finding(
                     "github-build-token",
                     input_path,
                     "GitHub token forwarding into BuildKit is denied",
                     Some("Remove github-token and use explicit native SCM/registry capabilities.".to_owned()),
                 ),
-                _ => self.finding(
-                    CompatibilityStatus::Unsupported,
+                _ => self.unsupported(
                     "unknown-docker-build-input",
                     input_path,
                     format!("docker/build-push input `{input}` is not implemented"),
@@ -244,8 +229,7 @@ impl Analyzer {
         ];
         command.extend(extra_args);
         effects.runner_capabilities.insert("buildkit".to_owned());
-        self.finding(
-            CompatibilityStatus::Emulated,
+        self.emulated(
             "native-buildkit-build",
             format!("{path}.uses"),
             format!("`{reference}` maps to isolated BuildKit through an explicit native runner capability"),

@@ -6,18 +6,18 @@ translates supported workflows into native Runtrue workflow YAML and lockfile
 material.
 
 The adapter is not an execution engine. Runtrue core independently validates
-the adapter's bounded output, digests, contract generation, configuration, and
-provenance before planning or execution.
+the adapter's bounded output and derives its digests, configuration identity,
+and provenance before planning or execution.
 
 ## Compatibility
 
 This release is built against Runtrue core revision
-`0ff23cf70485260741473993156fca2d5a0c7a40`. All Runtrue packages in
+`bcaba397cc04095ac7dd45fbf177339e5efb6846`. All Runtrue packages in
 `Cargo.toml` use that one exact revision so the frontend contract and workflow
 types have a single reviewed source.
 
 The adapter identity is `runtrue.github-actions`; its current frontend
-generation is `1`, and the supported frontend contract generation is `1`.
+generation is `2`, and the supported frontend contract generation is `2`.
 
 ## Development
 

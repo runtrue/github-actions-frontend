@@ -19,21 +19,13 @@ use runtrue_workflow_ast as ast;
 use runtrue_workflow_frontend::{
     PreparedWorkflowSource, WorkflowFrontendError, WorkflowFrontendErrorKind,
     WorkflowFrontendOptions, WorkflowFrontendReport, WorkflowSourceFrontend,
-    WORKFLOW_FRONTEND_CONTRACT_GENERATION,
 };
-use strict_yaml::{validate_expanded_yaml_budget, StrictYamlValue};
+use strict_yaml::validate_strict_yaml;
 
 pub use error::ImportError;
 pub use report::{
     CompatibilityFinding, CompatibilityReport, CompatibilityStatus, ImportResult, StatusCounts,
 };
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ImportOptions {
-    /// Operator-approved, immutable OCI image used for hosted Linux jobs when
-    /// this installation has no microVM runner configured.
-    pub default_job_container_image: Option<String>,
-}
 
 /// Generic frontend option understood by the GitHub Actions adapter.
 pub const DEFAULT_JOB_CONTAINER_IMAGE_OPTION: &str =
@@ -45,6 +37,14 @@ pub const DEFAULT_JOB_CONTAINER_IMAGE_OPTION: &str =
 pub struct GithubActionsFrontend;
 
 impl WorkflowSourceFrontend for GithubActionsFrontend {
+    fn frontend_id(&self) -> &'static str {
+        "runtrue.github-actions"
+    }
+
+    fn frontend_generation(&self) -> u32 {
+        2
+    }
+
     fn discovery_roots(&self) -> &'static [&'static str] {
         &[".github/workflows"]
     }
@@ -61,14 +61,12 @@ impl WorkflowSourceFrontend for GithubActionsFrontend {
         workflow_path: &str,
         options: &WorkflowFrontendOptions,
     ) -> Result<PreparedWorkflowSource, WorkflowFrontendError> {
-        let imported = import_github_actions_with_options(
+        let imported = import_github_actions_with_default_job_container_image(
             source,
             workflow_path,
-            ImportOptions {
-                default_job_container_image: options
-                    .value(DEFAULT_JOB_CONTAINER_IMAGE_OPTION)
-                    .map(str::to_owned),
-            },
+            options
+                .value(DEFAULT_JOB_CONTAINER_IMAGE_OPTION)
+                .map(str::to_owned),
         )
         .map_err(|error| {
             WorkflowFrontendError::new(
@@ -82,7 +80,7 @@ impl WorkflowSourceFrontend for GithubActionsFrontend {
                 .report
                 .findings
                 .iter()
-                .filter(|finding| finding.blocking)
+                .filter(|finding| finding.is_blocking())
                 .map(|finding| finding.code.as_str())
                 .take(8)
                 .collect::<Vec<_>>()
@@ -106,17 +104,10 @@ impl WorkflowSourceFrontend for GithubActionsFrontend {
             )
         })?;
         Ok(PreparedWorkflowSource {
-            contract_generation: WORKFLOW_FRONTEND_CONTRACT_GENERATION,
-            frontend_id: "runtrue.github-actions",
-            frontend_generation: 1,
-            input_digest: runtrue_model::ContentDigest::sha256(source.as_bytes()),
-            configuration_digest: options.digest(),
-            native_digest: runtrue_model::ContentDigest::sha256(native_yaml.as_bytes()),
             native_yaml,
             generated_lockfile_toml: imported.lockfile_toml,
             report: Some(WorkflowFrontendReport {
                 media_type: "application/vnd.runtrue.github-actions-compatibility+json".to_owned(),
-                digest: runtrue_model::ContentDigest::sha256(&report_bytes),
                 bytes: report_bytes,
             }),
         })
@@ -132,23 +123,20 @@ pub fn import_github_actions(
     source: &str,
     source_name: impl Into<String>,
 ) -> Result<ImportResult, ImportError> {
-    import_github_actions_with_options(source, source_name, ImportOptions::default())
+    import_github_actions_with_default_job_container_image(source, source_name, None)
 }
 
-pub fn import_github_actions_with_options(
+fn import_github_actions_with_default_job_container_image(
     source: &str,
     source_name: impl Into<String>,
-    options: ImportOptions,
+    default_job_container_image: Option<String>,
 ) -> Result<ImportResult, ImportError> {
     if source.len() > MAX_GITHUB_WORKFLOW_BYTES {
         return Err(ImportError::TooLarge);
     }
-    validate_expanded_yaml_budget(source)?;
-    // This allocation is intentional: unlike `serde_yaml::Value`, the strict
-    // visitor rejects duplicate keys recursively before typed decoding.
-    let _: StrictYamlValue = serde_yaml::from_str(source)?;
+    validate_strict_yaml(source)?;
     let workflow: GithubWorkflow = serde_yaml::from_str(source)?;
-    Analyzer::new(source_name.into(), options).analyze(workflow)
+    Analyzer::new(source_name.into(), default_job_container_image).analyze(workflow)
 }
 
 #[cfg(test)]

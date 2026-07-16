@@ -28,8 +28,7 @@ impl Analyzer {
             if has_secret_expression(&yaml_text(value))
                 && !is_github_token_expression(&yaml_text(value))
             {
-                self.finding(
-                    CompatibilityStatus::Unsafe,
+                self.unsafe_finding(
                     "raw-github-secret",
                     format!("{path}.with.{name}"),
                     "GitHub secret or token expressions cannot be passed through an imported action",
@@ -49,8 +48,7 @@ impl Analyzer {
             return ActionMapping::placeholder();
         };
         let Some((action, selector)) = reference.rsplit_once('@') else {
-            self.finding(
-                CompatibilityStatus::Unsupported,
+            self.unsupported(
                 "action-without-selector",
                 format!("{path}.uses"),
                 format!("action `{reference}` has no selector"),
@@ -59,8 +57,7 @@ impl Analyzer {
             return ActionMapping::placeholder();
         };
         if action.is_empty() || selector.is_empty() {
-            self.finding(
-                CompatibilityStatus::Unsupported,
+            self.unsupported(
                 "invalid-action-reference",
                 format!("{path}.uses"),
                 format!("action reference `{reference}` has an empty action name or selector"),
@@ -86,8 +83,7 @@ impl Analyzer {
             }
             _ if action.starts_with("./") => {
                 self.unresolved_action_inputs(inputs, path, CompatibilityStatus::Unsupported);
-                self.finding(
-                    CompatibilityStatus::Unsupported,
+                self.unsupported(
                     "local-github-action",
                     format!("{path}.uses"),
                     "local JavaScript/composite/Docker action metadata is not imported by this static front end",
@@ -100,8 +96,7 @@ impl Analyzer {
             }
             _ if is_full_git_commit(selector) => {
                 self.unresolved_action_inputs(inputs, path, CompatibilityStatus::RequiresGithub);
-                self.finding(
-                    CompatibilityStatus::RequiresGithub,
+                self.requires_github(
                     "unresolved-pinned-action",
                     format!("{path}.uses"),
                     format!("pinned action `{reference}` has no approved native component digest, signature identity, or runtime adapter"),
@@ -111,8 +106,7 @@ impl Analyzer {
             }
             _ => {
                 self.unresolved_action_inputs(inputs, path, CompatibilityStatus::Unsafe);
-                self.finding(
-                    CompatibilityStatus::Unsafe,
+                self.unsafe_finding(
                     "mutable-third-party-action",
                     format!("{path}.uses"),
                     format!("third-party action `{reference}` is mutable or not pinned to a full commit"),
@@ -161,8 +155,7 @@ impl Analyzer {
         let image = reference.trim_start_matches("docker://");
         if !is_full_sha256_image(image) {
             self.unresolved_action_inputs(inputs, path, CompatibilityStatus::Unsafe);
-            self.finding(
-                CompatibilityStatus::Unsafe,
+            self.unsafe_finding(
                 "mutable-container-action-image",
                 format!("{path}.uses"),
                 "Docker container action image is not pinned to a full lowercase sha256 digest",
@@ -177,8 +170,7 @@ impl Analyzer {
             .as_ref()
             .is_some_and(|current| current != image)
         {
-            self.finding(
-                CompatibilityStatus::Unsupported,
+            self.unsupported(
                 "multiple-container-action-images",
                 format!("{path}.uses"),
                 "one native OCI job cannot execute actions from different container images",
@@ -199,8 +191,7 @@ impl Analyzer {
                         "/workspace/.runtrue-runtime/scm-token".to_owned(),
                     ),
                 );
-                self.finding(
-                    CompatibilityStatus::Emulated,
+                self.emulated(
                     "scoped-github-token",
                     input_path,
                     "github.token maps to an execution-scoped provider credential file and is never placed in the environment",
@@ -223,8 +214,7 @@ impl Analyzer {
             );
             if let Some(value) = self.convert_scalar(value, &input_path) {
                 if env.insert(normalized.clone(), value).is_some() {
-                    self.finding(
-                        CompatibilityStatus::Unsupported,
+                    self.unsupported(
                         "container-action-input-collision",
                         input_path,
                         format!("multiple action inputs normalize to `{normalized}`"),
@@ -248,8 +238,7 @@ impl Analyzer {
             resolved: image.to_owned(),
             platform: "linux/amd64".to_owned(),
         });
-        self.finding(
-            CompatibilityStatus::Emulated,
+        self.emulated(
             "pinned-container-action",
             format!("{path}.uses"),
             "pinned Docker action maps to its exact OCI image and the Runtrue container-action entrypoint contract",

@@ -29,7 +29,7 @@ fn unsafe_features_are_all_reported_and_block_output() {
         .findings
         .iter()
         .filter(|finding| finding.status == CompatibilityStatus::Unsafe)
-        .all(|finding| finding.blocking));
+        .all(|finding| finding.is_blocking()));
 }
 
 #[test]
@@ -94,7 +94,7 @@ jobs:
                 finding.path == path
                     && finding.code == "raw-github-secret"
                     && finding.status == CompatibilityStatus::Unsafe
-                    && finding.blocking
+                    && finding.is_blocking()
             }),
             "missing unsafe finding for {path}: {}",
             result.report.render_human()
@@ -110,6 +110,6 @@ jobs:
     assert!(result.report.findings.iter().any(|finding| {
         finding.path == "jobs.test.steps[0].with.lookup-only"
             && finding.code == "dynamic-expression"
-            && finding.blocking
+            && finding.is_blocking()
     }));
 }

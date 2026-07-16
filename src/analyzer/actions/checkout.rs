@@ -1,5 +1,5 @@
 use super::{ActionMapping, Analyzer, JobEffects};
-use crate::{analyzer::static_string, report::CompatibilityStatus};
+use crate::analyzer::static_string;
 use runtrue_workflow_ast as ast;
 use serde_yaml::Value as YamlValue;
 use std::collections::BTreeMap;
@@ -24,8 +24,7 @@ impl Analyzer {
                 | "set-safe-directory"
                 | "sparse-checkout-cone-mode" => {
                     if static_string(value).is_some() {
-                        self.finding(
-                            CompatibilityStatus::Emulated,
+                        self.emulated(
                             "checkout-option",
                             input_path,
                             format!("checkout option `{name}` is recorded but native repository materialization may differ"),
@@ -40,8 +39,7 @@ impl Analyzer {
                     }
                 }
                 "token" | "ssh-key" => {
-                    self.finding(
-                        CompatibilityStatus::Unsafe,
+                    self.unsafe_finding(
                         "checkout-credential",
                         input_path,
                         "checkout credentials cannot be embedded or forwarded from GitHub",
@@ -57,16 +55,14 @@ impl Analyzer {
                 | "persist-credentials"
                 | "sparse-checkout"
                 | "github-server-url" => {
-                    self.finding(
-                        CompatibilityStatus::RequiresGithub,
+                    self.requires_github(
                         "checkout-repository-option",
                         input_path,
                         format!("checkout option `{name}` changes GitHub repository materialization semantics"),
                         Some("Express additional repository/ref materialization through the native SCM and lock model.".to_owned()),
                     );
                 }
-                _ => self.finding(
-                    CompatibilityStatus::Unsupported,
+                _ => self.unsupported(
                     "unknown-checkout-input",
                     input_path,
                     format!("checkout input `{name}` is not implemented"),
@@ -75,8 +71,7 @@ impl Analyzer {
             }
         }
         effects.permissions.repository = effects.permissions.repository.max(ast::Access::Read);
-        self.finding(
-            CompatibilityStatus::Emulated,
+        self.emulated(
             "native-checkout",
             format!("{path}.uses"),
             format!(

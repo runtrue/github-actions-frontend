@@ -10,11 +10,11 @@ readme = "README.md"
 description = "Strict, fail-closed GitHub Actions workflow frontend for Runtrue"
 
 [dependencies]
-runtrue-compiler = { git = "https://github.com/runtrue/runtrue", rev = "0ff23cf70485260741473993156fca2d5a0c7a40" }
-runtrue-lock = { git = "https://github.com/runtrue/runtrue", rev = "0ff23cf70485260741473993156fca2d5a0c7a40" }
-runtrue-model = { git = "https://github.com/runtrue/runtrue", rev = "0ff23cf70485260741473993156fca2d5a0c7a40" }
-runtrue-workflow-frontend = { git = "https://github.com/runtrue/runtrue", rev = "0ff23cf70485260741473993156fca2d5a0c7a40" }
-runtrue-workflow-ast = { git = "https://github.com/runtrue/runtrue", rev = "0ff23cf70485260741473993156fca2d5a0c7a40" }
+runtrue-compiler = { git = "https://github.com/runtrue/runtrue", rev = "bcaba397cc04095ac7dd45fbf177339e5efb6846" }
+runtrue-lock = { git = "https://github.com/runtrue/runtrue", rev = "bcaba397cc04095ac7dd45fbf177339e5efb6846" }
+runtrue-model = { git = "https://github.com/runtrue/runtrue", rev = "bcaba397cc04095ac7dd45fbf177339e5efb6846" }
+runtrue-workflow-frontend = { git = "https://github.com/runtrue/runtrue", rev = "bcaba397cc04095ac7dd45fbf177339e5efb6846" }
+runtrue-workflow-ast = { git = "https://github.com/runtrue/runtrue", rev = "bcaba397cc04095ac7dd45fbf177339e5efb6846" }
 serde = { version = "=1.0.228", features = ["derive"] }
 serde_json = "=1.0.150"
 serde_yaml = "=0.9.34"

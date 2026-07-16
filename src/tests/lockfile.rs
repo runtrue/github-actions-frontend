@@ -4,7 +4,6 @@ fn supported_workflow_emits_compiler_validated_native_yaml_and_exact_lock() {
     let result = import_github_actions(SUPPORTED, "supported.yml").unwrap();
     assert!(result.report.compatible, "{}", result.report.render_human());
     assert!(result.report.native_ast_validated);
-    assert!(result.report.schema_validated);
     assert!(result.report.compiler_validated);
     assert_eq!(result.report.mapped_jobs, 2);
     assert_eq!(result.report.mapped_steps, 6);
@@ -102,7 +101,7 @@ fn mutable_or_optioned_job_containers_do_not_emit_runner_images() {
             assert!(result.lockfile_toml.is_none());
             assert!(
                 result.report.findings.iter().any(|finding| {
-                    finding.code == expected_code && finding.blocking
+                    finding.code == expected_code && finding.is_blocking()
                 }),
                 "missing {expected_code}: {}",
                 result.report.render_human()

@@ -191,7 +191,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 [[package]]
 name = "runtrue-compiler"
 version = "0.1.0"
-source = "git+https://github.com/runtrue/runtrue?rev=0ff23cf70485260741473993156fca2d5a0c7a40#0ff23cf70485260741473993156fca2d5a0c7a40"
+source = "git+https://github.com/runtrue/runtrue?rev=bcaba397cc04095ac7dd45fbf177339e5efb6846#bcaba397cc04095ac7dd45fbf177339e5efb6846"
 dependencies = [
  "regex",
  "runtrue-expression",
@@ -208,7 +208,7 @@ dependencies = [
 [[package]]
 name = "runtrue-expression"
 version = "0.1.0"
-source = "git+https://github.com/runtrue/runtrue?rev=0ff23cf70485260741473993156fca2d5a0c7a40#0ff23cf70485260741473993156fca2d5a0c7a40"
+source = "git+https://github.com/runtrue/runtrue?rev=bcaba397cc04095ac7dd45fbf177339e5efb6846#bcaba397cc04095ac7dd45fbf177339e5efb6846"
 dependencies = [
  "serde",
  "thiserror",
@@ -234,7 +234,7 @@ dependencies = [
 [[package]]
 name = "runtrue-lock"
 version = "0.1.0"
-source = "git+https://github.com/runtrue/runtrue?rev=0ff23cf70485260741473993156fca2d5a0c7a40#0ff23cf70485260741473993156fca2d5a0c7a40"
+source = "git+https://github.com/runtrue/runtrue?rev=bcaba397cc04095ac7dd45fbf177339e5efb6846#bcaba397cc04095ac7dd45fbf177339e5efb6846"
 dependencies = [
  "runtrue-model",
  "serde",
@@ -246,7 +246,7 @@ dependencies = [
 [[package]]
 name = "runtrue-model"
 version = "0.1.0"
-source = "git+https://github.com/runtrue/runtrue?rev=0ff23cf70485260741473993156fca2d5a0c7a40#0ff23cf70485260741473993156fca2d5a0c7a40"
+source = "git+https://github.com/runtrue/runtrue?rev=bcaba397cc04095ac7dd45fbf177339e5efb6846#bcaba397cc04095ac7dd45fbf177339e5efb6846"
 dependencies = [
  "hex",
  "serde",
@@ -257,7 +257,7 @@ dependencies = [
 [[package]]
 name = "runtrue-workflow-ast"
 version = "0.1.0"
-source = "git+https://github.com/runtrue/runtrue?rev=0ff23cf70485260741473993156fca2d5a0c7a40#0ff23cf70485260741473993156fca2d5a0c7a40"
+source = "git+https://github.com/runtrue/runtrue?rev=bcaba397cc04095ac7dd45fbf177339e5efb6846#bcaba397cc04095ac7dd45fbf177339e5efb6846"
 dependencies = [
  "indexmap",
  "runtrue-model",
@@ -269,7 +269,7 @@ dependencies = [
 [[package]]
 name = "runtrue-workflow-frontend"
 version = "0.1.0"
-source = "git+https://github.com/runtrue/runtrue?rev=0ff23cf70485260741473993156fca2d5a0c7a40#0ff23cf70485260741473993156fca2d5a0c7a40"
+source = "git+https://github.com/runtrue/runtrue?rev=bcaba397cc04095ac7dd45fbf177339e5efb6846#bcaba397cc04095ac7dd45fbf177339e5efb6846"
 dependencies = [
  "runtrue-model",
 ]
@@ -277,7 +277,7 @@ dependencies = [
 [[package]]
 name = "runtrue-workflow-ir"
 version = "0.1.0"
-source = "git+https://github.com/runtrue/runtrue?rev=0ff23cf70485260741473993156fca2d5a0c7a40#0ff23cf70485260741473993156fca2d5a0c7a40"
+source = "git+https://github.com/runtrue/runtrue?rev=bcaba397cc04095ac7dd45fbf177339e5efb6846#bcaba397cc04095ac7dd45fbf177339e5efb6846"
 dependencies = [
  "runtrue-model",
  "serde",

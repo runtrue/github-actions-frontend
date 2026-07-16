@@ -15,7 +15,6 @@ use crate::{
     report::{
         CompatibilityFinding, CompatibilityReport, CompatibilityStatus, ImportResult, StatusCounts,
     },
-    ImportOptions,
 };
 use runtrue_compiler::{CompileContext, Compiler};
 use serde_yaml::Value as YamlValue;
@@ -57,8 +56,30 @@ pub(crate) struct Analyzer {
     pub(crate) default_job_container_image: Option<String>,
 }
 
+macro_rules! finding_helpers {
+    ($($name:ident => $status:ident),+ $(,)?) => {
+        $(
+            pub(crate) fn $name(
+                &mut self,
+                code: impl Into<String>,
+                path: impl Into<String>,
+                message: impl Into<String>,
+                required_change: Option<String>,
+            ) {
+                self.finding(
+                    CompatibilityStatus::$status,
+                    code,
+                    path,
+                    message,
+                    required_change,
+                );
+            }
+        )+
+    };
+}
+
 impl Analyzer {
-    pub(crate) fn new(source_name: String, options: ImportOptions) -> Self {
+    pub(crate) fn new(source_name: String, default_job_container_image: Option<String>) -> Self {
         Self {
             source_name,
             findings: Vec::new(),
@@ -68,7 +89,7 @@ impl Analyzer {
             lock_images: BTreeSet::new(),
             pull_request_target_requested: false,
             workflow_concurrency: None,
-            default_job_container_image: options.default_job_container_image,
+            default_job_container_image,
         }
     }
 
@@ -88,15 +109,21 @@ impl Analyzer {
             code: code.into(),
             path: path.into(),
             message: message.into(),
-            blocking: status.is_blocking(),
             required_change,
         });
     }
 
+    finding_helpers! {
+        supported => Supported,
+        emulated => Emulated,
+        requires_github => RequiresGithub,
+        unsafe_finding => Unsafe,
+        unsupported => Unsupported,
+    }
+
     pub(crate) fn unsupported_extras(&mut self, path: &str, extras: &BTreeMap<String, YamlValue>) {
         for field in extras.keys() {
-            self.finding(
-                CompatibilityStatus::Unsupported,
+            self.unsupported(
                 "unknown-field",
                 format!("{path}.{field}"),
                 format!("GitHub field `{field}` has no importer mapping"),
@@ -130,16 +157,14 @@ impl Analyzer {
                         })
                 });
             if safe {
-                self.finding(
-                    CompatibilityStatus::Emulated,
+                self.emulated(
                     "trusted-pull-request-target",
                     "on.pull_request_target",
                     "pull_request_target uses the trusted default-branch workflow and only digest-pinned container actions",
                     None,
                 );
             } else {
-                self.finding(
-                    CompatibilityStatus::Unsafe,
+                self.unsafe_finding(
                     "pull-request-target-source-execution",
                     "on.pull_request_target",
                     "pull_request_target is allowed only when every job contains digest-pinned container actions and no source-code run steps",
@@ -160,8 +185,7 @@ impl Analyzer {
             self.convert_concurrency(workflow.concurrency.as_ref(), "concurrency");
 
         if workflow.jobs.is_empty() {
-            self.finding(
-                CompatibilityStatus::Unsupported,
+            self.unsupported(
                 "empty-workflow",
                 "jobs",
                 "the workflow contains no jobs",
@@ -192,7 +216,7 @@ impl Analyzer {
         self.findings.sort_by(|left, right| {
             (&left.path, &left.code, left.status).cmp(&(&right.path, &right.code, right.status))
         });
-        let compatible = !self.findings.iter().any(|finding| finding.blocking);
+        let compatible = !self.findings.iter().any(CompatibilityFinding::is_blocking);
         let mut status_counts = StatusCounts::default();
         for finding in &self.findings {
             status_counts.add(finding.status);
@@ -207,15 +231,11 @@ impl Analyzer {
 
         let mut native_yaml = None;
         let mut lockfile_toml = None;
-        let mut native_ast_validated = false;
-        let mut compiler_validated = false;
         if compatible {
             let yaml = serde_yaml::to_string(&workflow)
                 .map_err(|error| ImportError::Serialize(error.to_string()))?;
             runtrue_workflow_ast::parse_yaml(&yaml)
                 .map_err(|error| ImportError::GeneratedWorkflow(error.to_string()))?;
-            native_ast_validated = true;
-
             let parsed_lock = build_lockfile(self.lock_images)?.map(|(lock, text)| {
                 lockfile_toml = Some(text);
                 lock
@@ -228,7 +248,6 @@ impl Analyzer {
             Compiler::default()
                 .compile_yaml(&yaml, context)
                 .map_err(|error| ImportError::GeneratedWorkflow(error.to_string()))?;
-            compiler_validated = true;
             native_yaml = Some(yaml);
         }
 
@@ -242,9 +261,8 @@ impl Analyzer {
                 mapped_jobs: self.mapped_jobs,
                 mapped_steps: self.mapped_steps,
                 status_counts,
-                schema_validated: native_ast_validated,
-                native_ast_validated,
-                compiler_validated,
+                native_ast_validated: compatible,
+                compiler_validated: compatible,
                 findings: self.findings,
                 required_changes: self.required_changes.into_iter().collect(),
             },

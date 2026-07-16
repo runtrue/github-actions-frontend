@@ -15,17 +15,22 @@ fn report_has_stable_machine_and_human_status_names() {
     assert!(human.contains("Overall compatibility:"));
     assert!(human.contains("Required changes:"));
     assert!(human.contains("[UNSAFE]"));
+    let report = serde_json::to_value(&result.report).unwrap();
+    assert!(report.get("schema_validated").is_none());
+    assert!(report["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|finding| finding.get("blocking").is_none()));
 }
 
 #[test]
 fn operator_default_container_maps_hosted_linux_job_to_oci() {
     let image = format!("registry.example/runtrue-runner@sha256:{}", "a".repeat(64));
-    let result = import_github_actions_with_options(
+    let result = import_github_actions_with_default_job_container_image(
         "on: pull_request\njobs:\n  test:\n    runs-on: ubuntu-24.04\n    steps:\n      - run: echo ok\n",
         "fallback.github.yml",
-        ImportOptions {
-            default_job_container_image: Some(image.clone()),
-        },
+        Some(image.clone()),
     )
     .expect("import");
     let workflow = ast::parse_yaml(result.native_yaml.as_deref().expect("native workflow"))
@@ -35,9 +40,7 @@ fn operator_default_container_maps_hosted_linux_job_to_oci() {
         workflow.jobs["test"].runner.image.as_deref(),
         Some(image.as_str())
     );
-    assert!(result
-        .report
-        .findings
-        .iter()
-        .any(|finding| { finding.code == "operator-default-job-container" && !finding.blocking }));
+    assert!(result.report.findings.iter().any(|finding| {
+        finding.code == "operator-default-job-container" && !finding.is_blocking()
+    }));
 }

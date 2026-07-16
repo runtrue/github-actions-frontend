@@ -15,7 +15,7 @@ jobs:
     assert!(!result.report.compatible);
     assert!(result.native_yaml.is_none());
     assert!(result.report.findings.iter().any(|finding| {
-        finding.path == "jobs.test.<<" && finding.code == "unknown-field" && finding.blocking
+        finding.path == "jobs.test.<<" && finding.code == "unknown-field" && finding.is_blocking()
     }));
 }
 
@@ -35,7 +35,7 @@ jobs:
     assert!(result.report.findings.iter().any(|finding| {
         finding.code == "invalid-action-reference"
             && finding.path == "jobs.test.steps[0].uses"
-            && finding.blocking
+            && finding.is_blocking()
     }));
 }
 
@@ -49,7 +49,7 @@ fn github_only_and_pinned_unresolved_actions_do_not_invent_digests() {
         assert!(result.report.findings.iter().any(|finding| {
             finding.code == code
                 && finding.status == CompatibilityStatus::RequiresGithub
-                && finding.blocking
+                && finding.is_blocking()
         }));
     }
 }
@@ -100,4 +100,12 @@ fn multiple_yaml_documents_are_rejected() {
         .unwrap_err()
         .to_string();
     assert!(error.contains("exactly one YAML document"), "{error}");
+}
+
+#[test]
+fn non_finite_yaml_numbers_are_rejected() {
+    let error = import_github_actions("name: .nan\non: push\njobs: {}\n", "nan.yml")
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("numeric values must be finite"), "{error}");
 }

@@ -19,8 +19,7 @@ impl Analyzer {
             let input_path = format!("{path}.with.{input}");
             match input.as_str() {
                 "install" | "use" | "cleanup" if static_string(value).is_some() => {
-                    self.finding(
-                        CompatibilityStatus::Emulated,
+                    self.emulated(
                         "buildx-setup-option",
                         input_path,
                         format!("Buildx setup option `{input}` is replaced by the selected native BuildKit runner capability"),
@@ -43,8 +42,7 @@ impl Analyzer {
                         Some("Remove custom Buildx daemon/driver configuration and use an approved native BuildKit profile.".to_owned()),
                     );
                 }
-                _ => self.finding(
-                    CompatibilityStatus::Unsupported,
+                _ => self.unsupported(
                     "unknown-buildx-input",
                     input_path,
                     format!("setup-buildx input `{input}` is not implemented"),
@@ -53,8 +51,7 @@ impl Analyzer {
             }
         }
         effects.runner_capabilities.insert("buildkit".to_owned());
-        self.finding(
-            CompatibilityStatus::Emulated,
+        self.emulated(
             "native-buildkit-setup",
             format!("{path}.uses"),
             format!("`{reference}` maps to an isolated native BuildKit runner capability"),

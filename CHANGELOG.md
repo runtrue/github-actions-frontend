@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Merge strict YAML integrity and expansion-budget validation into one pass.
+- Remove derived compatibility-report fields and bump the frontend generation
+  to 2 so the report-schema change cannot reuse prior approval identity.
+- Adopt frontend contract generation 2, with trusted core-derived provenance.
+- Remove the one-field public import-options API; generic frontend options
+  remain the supported configuration boundary.
+
 ## 0.1.0 - 2026-07-16
 
 - Extract the GitHub Actions frontend into an independently versioned package.

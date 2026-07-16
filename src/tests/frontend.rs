@@ -1,7 +1,6 @@
 use super::*;
 use runtrue_workflow_frontend::{
     WorkflowFrontendErrorKind, WorkflowFrontendOptions, WorkflowSourceFrontend,
-    WORKFLOW_FRONTEND_CONTRACT_GENERATION,
 };
 
 #[test]
@@ -25,30 +24,17 @@ fn github_frontend_is_deterministic_and_binds_translation_identity() {
         .prepare(source, ".github/workflows/ci.yml", &options)
         .unwrap();
 
-    first.validate_for(source, &options).unwrap();
-    second.validate_for(source, &options).unwrap();
     assert_eq!(first, second);
     assert_eq!(
-        first.contract_generation,
-        WORKFLOW_FRONTEND_CONTRACT_GENERATION
+        GithubActionsFrontend.frontend_id(),
+        "runtrue.github-actions"
     );
-    assert_eq!(first.configuration_digest, options.digest());
+    assert_eq!(GithubActionsFrontend.frontend_generation(), 2);
     assert!(first.native_yaml.contains(
         "registry.example/runtrue-ci@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     ));
-    assert_eq!(
-        first.input_digest,
-        runtrue_model::ContentDigest::sha256(source)
-    );
-    assert_eq!(
-        first.native_digest,
-        runtrue_model::ContentDigest::sha256(first.native_yaml.as_bytes())
-    );
     let report = first.report.unwrap();
-    assert_eq!(
-        report.digest,
-        runtrue_model::ContentDigest::sha256(&report.bytes)
-    );
+    assert!(!report.bytes.is_empty());
 }
 
 #[test]

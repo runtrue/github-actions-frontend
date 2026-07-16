@@ -41,9 +41,15 @@ pub struct CompatibilityFinding {
     pub code: String,
     pub path: String,
     pub message: String,
-    pub blocking: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub required_change: Option<String>,
+}
+
+impl CompatibilityFinding {
+    #[must_use]
+    pub const fn is_blocking(&self) -> bool {
+        self.status.is_blocking()
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -84,7 +90,6 @@ pub struct CompatibilityReport {
     pub mapped_steps: usize,
     pub status_counts: StatusCounts,
     /// True when emitted YAML passed the authoritative strict native schema parser.
-    pub schema_validated: bool,
     pub native_ast_validated: bool,
     pub compiler_validated: bool,
     pub findings: Vec<CompatibilityFinding>,
