@@ -5,18 +5,22 @@ mod security;
 mod steps;
 mod workflow;
 
+pub(crate) use actions::is_canonical_repository_action;
+
 use crate::{
     error::ImportError,
     github::GithubWorkflow,
     native::{
-        build_lockfile, GeneratedImageLock, NativeCache, NativeJob, NativeOutput, NativeRun,
-        NativeStepCapabilities, NativeWorkflow, PermissionState,
+        build_lockfile, GeneratedComponentLock, GeneratedImageLock, NativeCache, NativeJob,
+        NativeOutput, NativeRun, NativeStepCapabilities, NativeWorkflow, PermissionState,
     },
     report::{
         CompatibilityFinding, CompatibilityReport, CompatibilityStatus, ImportResult, StatusCounts,
     },
+    DEFAULT_JOB_CONTAINER_IMAGE_OPTION,
 };
 use runtrue_compiler::{CompileContext, Compiler};
+use runtrue_workflow_frontend::{ResolvedProgramRef, WorkflowFrontendOptions};
 use serde_yaml::Value as YamlValue;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -34,6 +38,9 @@ pub(crate) struct JobEffects {
     pub(crate) outputs: BTreeMap<String, NativeOutput>,
     pub(crate) runner_capabilities: BTreeSet<String>,
     pub(crate) container_action_image: Option<String>,
+    pub(crate) wasm_component: bool,
+    pub(crate) network_destinations: BTreeSet<(String, u16)>,
+    pub(crate) allow_private_network: bool,
 }
 
 pub(crate) struct ActionMapping {
@@ -51,9 +58,11 @@ pub(crate) struct Analyzer {
     pub(crate) mapped_jobs: usize,
     pub(crate) mapped_steps: usize,
     pub(crate) lock_images: BTreeSet<GeneratedImageLock>,
+    pub(crate) lock_components: BTreeSet<GeneratedComponentLock>,
     pub(crate) pull_request_target_requested: bool,
     pub(crate) workflow_concurrency: Option<String>,
     pub(crate) default_job_container_image: Option<String>,
+    pub(crate) frontend_options: WorkflowFrontendOptions,
 }
 
 macro_rules! finding_helpers {
@@ -79,7 +88,10 @@ macro_rules! finding_helpers {
 }
 
 impl Analyzer {
-    pub(crate) fn new(source_name: String, default_job_container_image: Option<String>) -> Self {
+    pub(crate) fn new(source_name: String, options: WorkflowFrontendOptions) -> Self {
+        let default_job_container_image = options
+            .value(DEFAULT_JOB_CONTAINER_IMAGE_OPTION)
+            .map(str::to_owned);
         Self {
             source_name,
             findings: Vec::new(),
@@ -87,9 +99,11 @@ impl Analyzer {
             mapped_jobs: 0,
             mapped_steps: 0,
             lock_images: BTreeSet::new(),
+            lock_components: BTreeSet::new(),
             pull_request_target_requested: false,
             workflow_concurrency: None,
             default_job_container_image,
+            frontend_options: options,
         }
     }
 
@@ -149,9 +163,13 @@ impl Analyzer {
                             step.run.is_none()
                                 && step.uses.as_ref().and_then(static_string).is_some_and(
                                     |reference| {
-                                        reference
+                                        let direct = reference
                                             .strip_prefix("docker://")
-                                            .is_some_and(crate::validation::is_full_sha256_image)
+                                            .is_some_and(crate::validation::is_full_sha256_image);
+                                        direct || self.frontend_options.resolved_action(&reference).is_some_and(|action| {
+                                            matches!(action.program(), ResolvedProgramRef::Container { image, .. } if crate::validation::is_full_sha256_image(image))
+                                                || matches!(action.program(), ResolvedProgramRef::Component { reference, .. } if crate::validation::is_exact_wasm_component(reference))
+                                        })
                                     },
                                 )
                         })
@@ -160,14 +178,14 @@ impl Analyzer {
                 self.emulated(
                     "trusted-pull-request-target",
                     "on.pull_request_target",
-                    "pull_request_target uses the trusted default-branch workflow and only digest-pinned container actions",
+                    "pull_request_target uses the trusted default-branch workflow and only digest-pinned container or component actions",
                     None,
                 );
             } else {
                 self.unsafe_finding(
                     "pull-request-target-source-execution",
                     "on.pull_request_target",
-                    "pull_request_target is allowed only when every job contains digest-pinned container actions and no source-code run steps",
+                    "pull_request_target is allowed only when every job contains digest-pinned container or component actions and no source-code run steps",
                     Some(
                         "Package the automation as a digest-pinned container action and remove source-code execution from the trusted-target workflow."
                             .to_owned(),
@@ -236,10 +254,11 @@ impl Analyzer {
                 .map_err(|error| ImportError::Serialize(error.to_string()))?;
             runtrue_workflow_ast::parse_yaml(&yaml)
                 .map_err(|error| ImportError::GeneratedWorkflow(error.to_string()))?;
-            let parsed_lock = build_lockfile(self.lock_images)?.map(|(lock, text)| {
-                lockfile_toml = Some(text);
-                lock
-            });
+            let parsed_lock =
+                build_lockfile(self.lock_images, self.lock_components)?.map(|(lock, text)| {
+                    lockfile_toml = Some(text);
+                    lock
+                });
             let context = CompileContext {
                 workflow_path: self.source_name.clone(),
                 lockfile: parsed_lock,

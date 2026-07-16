@@ -22,7 +22,8 @@ impl Analyzer {
         self.unsupported_extras(&path, &job.extra);
         let name = self.convert_display_name(job.name, &format!("{path}.name"));
         if !valid_identifier(job_id) {
-            self.unsupported(
+            self.finding(
+                CompatibilityStatus::Unsupported,
                 "invalid-job-id",
                 &path,
                 "job id is not a valid native identifier",
@@ -61,13 +62,17 @@ impl Analyzer {
             outputs: BTreeMap::new(),
             runner_capabilities: BTreeSet::new(),
             container_action_image: None,
+            wasm_component: false,
+            network_destinations: BTreeSet::new(),
+            allow_private_network: false,
         };
         let mut steps = Vec::new();
         for (index, step) in job.steps.into_iter().enumerate() {
             steps.push(self.convert_step(step, &path, index, &mut effects));
         }
         if steps.is_empty() {
-            self.unsupported(
+            self.finding(
+                CompatibilityStatus::Unsupported,
                 "job-without-steps",
                 format!("{path}.steps"),
                 "native jobs require statically declared steps",
@@ -75,12 +80,19 @@ impl Analyzer {
             );
         } else {
             self.mapped_jobs += 1;
-            self.supported("job-dag-node", &path, "job maps to a native DAG node", None);
+            self.finding(
+                CompatibilityStatus::Supported,
+                "job-dag-node",
+                &path,
+                "job maps to a native DAG node",
+                None,
+            );
         }
 
         if !job.outputs.is_empty() {
             for output in job.outputs.keys() {
-                self.unsupported(
+                self.finding(
+                    CompatibilityStatus::Unsupported,
                     "github-job-output",
                     format!("{path}.outputs.{output}"),
                     "GitHub expression-based job outputs are not statically importable",
@@ -94,7 +106,8 @@ impl Analyzer {
                 &format!("{path}.uses"),
                 "reusable workflow jobs require explicit immutable native workflow resolution",
             );
-            self.requires_github(
+            self.finding(
+                CompatibilityStatus::RequiresGithub,
                 "reusable-github-workflow",
                 format!("{path}.uses"),
                 "GitHub reusable-workflow execution is unresolved",
@@ -102,7 +115,8 @@ impl Analyzer {
             );
         }
         if job.secrets.is_some() {
-            self.unsafe_finding(
+            self.finding(
+                CompatibilityStatus::Unsafe,
                 "reusable-workflow-secrets",
                 format!("{path}.secrets"),
                 "GitHub reusable-workflow secret forwarding cannot be copied safely",
@@ -118,7 +132,8 @@ impl Analyzer {
             effects.container_action_image.clone(),
         ) {
             (Some(_), Some(_)) => {
-                self.unsupported(
+                self.finding(
+                    CompatibilityStatus::Unsupported,
                     "nested-container-action",
                     format!("{path}.container"),
                     "a Docker container action cannot be flattened into a separate GitHub job container",
@@ -128,7 +143,17 @@ impl Analyzer {
             }
             (explicit, action) => explicit.or(action),
         };
-        if runner_image.is_none() {
+        if effects.wasm_component && runner_image.is_some() {
+            self.finding(
+                CompatibilityStatus::Unsupported,
+                "mixed-wasm-and-oci-job",
+                &path,
+                "a Wasm component action cannot share a job with an OCI job container",
+                Some("Place the component action in its own job.".to_owned()),
+            );
+            runner_image = None;
+        }
+        if runner_image.is_none() && !effects.wasm_component {
             if let Some(image) = self.default_job_container_image.clone() {
                 if is_full_sha256_image(&image) {
                     self.lock_images.insert(GeneratedImageLock {
@@ -136,7 +161,8 @@ impl Analyzer {
                         resolved: image.clone(),
                         platform: "linux/amd64".to_owned(),
                     });
-                    self.supported(
+                    self.finding(
+                        CompatibilityStatus::Supported,
                         "operator-default-job-container",
                         format!("{path}.runs-on"),
                         "hosted Linux runner maps to the installation's pinned OCI fallback image",
@@ -144,7 +170,8 @@ impl Analyzer {
                     );
                     runner_image = Some(image);
                 } else {
-                    self.unsafe_finding(
+                    self.finding(
+                        CompatibilityStatus::Unsafe,
                         "mutable-default-job-container",
                         format!("{path}.runs-on"),
                         "the installation OCI fallback image is not pinned to a full lowercase sha256 digest",
@@ -196,7 +223,10 @@ impl Analyzer {
             &format!("{path}.runs-on"),
             effects.runner_capabilities.iter().cloned().collect(),
             runner_image,
+            effects.wasm_component,
         );
+        effects.permissions.network_destinations = effects.network_destinations;
+        effects.permissions.allow_private_network = effects.allow_private_network;
         let permission_state = effects.permissions.clone();
         ConvertedJob {
             job: NativeJob {
@@ -234,7 +264,8 @@ impl Analyzer {
                     .and_then(YamlValue::as_bool)
                     .unwrap_or(false);
                 let Some(group) = group else {
-                    self.unsupported(
+                    self.finding(
+                        CompatibilityStatus::Unsupported,
                         "github-concurrency-group",
                         format!("{path}.group"),
                         "concurrency group must be a non-empty string",
@@ -245,7 +276,8 @@ impl Analyzer {
                 (group, cancel)
             }
             _ => {
-                self.unsupported(
+                self.finding(
+                    CompatibilityStatus::Unsupported,
                     "github-concurrency-group",
                     path,
                     "concurrency must be a string or a group mapping",
@@ -256,7 +288,8 @@ impl Analyzer {
         };
 
         if cancel_in_progress {
-            self.unsupported(
+            self.finding(
+                CompatibilityStatus::Unsupported,
                 "github-concurrency-cancellation",
                 format!("{path}.cancel-in-progress"),
                 "cancel-in-progress cannot be preserved by Runtrue's signed job scheduler",
@@ -273,7 +306,8 @@ impl Analyzer {
             .trim_end_matches(['-', '_', '.', '/'])
             .to_owned();
         if static_group.is_empty() {
-            self.unsupported(
+            self.finding(
+                CompatibilityStatus::Unsupported,
                 "github-concurrency-expression",
                 format!("{path}.group"),
                 "a concurrency group must have a stable prefix",
@@ -289,7 +323,13 @@ impl Analyzer {
         } else {
             "GitHub concurrency maps to a repository-scoped Runtrue scheduler group"
         };
-        self.emulated("repository-scoped-concurrency", path, message, None);
+        self.finding(
+            CompatibilityStatus::Emulated,
+            "repository-scoped-concurrency",
+            path,
+            message,
+            None,
+        );
         Some(static_group)
     }
 
@@ -321,7 +361,8 @@ impl Analyzer {
         let mut result = Vec::new();
         for needed in values {
             if has_expression(&needed) || !valid_identifier(&needed) {
-                self.unsupported(
+                self.finding(
+                    CompatibilityStatus::Unsupported,
                     "dynamic-or-invalid-needs",
                     path,
                     format!("dependency `{needed}` is not a static native job id"),
@@ -332,7 +373,8 @@ impl Analyzer {
             }
         }
         if !result.is_empty() {
-            self.supported(
+            self.finding(
+                CompatibilityStatus::Supported,
                 "job-needs",
                 path,
                 "static GitHub needs map exactly to native DAG dependencies",
@@ -361,7 +403,8 @@ impl Analyzer {
             None
         };
         if condition.is_some() {
-            self.supported(
+            self.finding(
+                CompatibilityStatus::Supported,
                 "static-condition",
                 path,
                 "static boolean condition maps to a native condition",
@@ -384,7 +427,8 @@ impl Analyzer {
     ) -> Option<String> {
         let value = value?;
         if let Some(minutes) = positive_u64(value) {
-            self.supported(
+            self.finding(
+                CompatibilityStatus::Supported,
                 "timeout",
                 path,
                 "GitHub timeout-minutes maps to a native duration",
@@ -403,12 +447,14 @@ impl Analyzer {
         path: &str,
         mut capabilities: Vec<String>,
         image: Option<String>,
+        wasm_component: bool,
     ) -> NativeRunner {
         capabilities.sort();
         let labels = value.and_then(static_runner_labels);
         match labels {
             Some(labels) if labels.iter().any(|label| label == "self-hosted") => {
-                self.unsafe_finding(
+                self.finding(
+                    CompatibilityStatus::Unsafe,
                     "self-hosted-runner",
                     path,
                     "self-hosted runner labels can request unreviewed host capabilities",
@@ -427,7 +473,8 @@ impl Analyzer {
                 } else {
                     "microVM"
                 };
-                self.emulated(
+                self.finding(
+                    CompatibilityStatus::Emulated,
                     "hosted-runner-image",
                     path,
                     format!("GitHub runner `{}` maps to a Runtrue linux/amd64 {isolation}; the hosted image toolset may differ", labels[0]),
@@ -435,7 +482,8 @@ impl Analyzer {
                 );
             }
             Some(labels) if labels.iter().any(|label| label.starts_with("windows-")) => {
-                self.unsupported(
+                self.finding(
+                    CompatibilityStatus::Unsupported,
                     "windows-runner",
                     path,
                     "Windows GitHub hosted runners are not implemented by this importer",
@@ -443,7 +491,8 @@ impl Analyzer {
                 );
             }
             Some(labels) if labels.iter().any(|label| label.starts_with("macos-")) => {
-                self.unsupported(
+                self.finding(
+                    CompatibilityStatus::Unsupported,
                     "macos-runner",
                     path,
                     "macOS GitHub hosted runners are not implemented by this importer",
@@ -451,7 +500,8 @@ impl Analyzer {
                 );
             }
             Some(labels) => {
-                self.unsupported(
+                self.finding(
+                    CompatibilityStatus::Unsupported,
                     "runner-labels",
                     path,
                     format!(
@@ -469,7 +519,8 @@ impl Analyzer {
                         "runs-on must be a supported static runner label",
                     );
                 } else {
-                    self.unsupported(
+                    self.finding(
+                        CompatibilityStatus::Unsupported,
                         "missing-runner",
                         path,
                         "job does not declare runs-on",
@@ -481,7 +532,20 @@ impl Analyzer {
         NativeRunner {
             os: "linux",
             arch: "amd64",
-            isolation: if image.is_some() { "oci" } else { "microvm" },
+            isolation: if wasm_component {
+                "wasm"
+            } else if image.is_some() {
+                "oci"
+            } else {
+                "microvm"
+            },
+            // A repository component is bounded by the WASM executor rather
+            // than by the GitHub-hosted VM profile named in `runs-on`.
+            // Declare that smaller profile explicitly so the native workflow
+            // does not inherit the AST's 4 GiB microVM default and get
+            // rejected by the executor's 256 MiB ceiling.
+            cpu: wasm_component.then_some(1),
+            memory: wasm_component.then_some("256MiB"),
             image,
             capabilities,
         }
@@ -533,7 +597,8 @@ impl Analyzer {
         }
 
         let Some(image_value) = image_value else {
-            self.unsupported(
+            self.finding(
+                CompatibilityStatus::Unsupported,
                 "missing-job-container-image",
                 format!("{path}.image"),
                 "job container mapping does not declare an image",
@@ -550,7 +615,8 @@ impl Analyzer {
             return None;
         };
         if !is_full_sha256_image(&image) {
-            self.unsafe_finding(
+            self.finding(
+                CompatibilityStatus::Unsafe,
                 "mutable-job-container-image",
                 format!("{path}.image"),
                 format!(
@@ -569,7 +635,8 @@ impl Analyzer {
             resolved: image.clone(),
             platform: "linux/amd64".to_owned(),
         });
-        self.supported(
+        self.finding(
+            CompatibilityStatus::Supported,
             "pinned-job-container-image",
             format!("{path}.image"),
             "immutable job container maps to the exact native OCI runner image lock",
@@ -589,7 +656,8 @@ impl Analyzer {
         self.unsupported_extras(path, &strategy.extra);
         if let Some(value) = &strategy.fail_fast {
             if value.as_bool().is_some() {
-                self.emulated(
+                self.finding(
+                    CompatibilityStatus::Emulated,
                     "matrix-fail-fast",
                     format!("{path}.fail-fast"),
                     "matrix values are preserved, but GitHub's sibling-cancellation timing is not part of the native capsule",
@@ -625,7 +693,8 @@ impl Analyzer {
         for (axis, values) in mapping {
             let axis_path = format!("{path}.matrix.{axis}");
             if matches!(axis.as_str(), "include" | "exclude") {
-                self.unsupported(
+                self.finding(
+                    CompatibilityStatus::Unsupported,
                     "matrix-include-exclude",
                     axis_path,
                     format!("matrix `{axis}` transformations are not implemented"),
@@ -637,7 +706,8 @@ impl Analyzer {
                 continue;
             }
             if !valid_identifier(&axis) {
-                self.unsupported(
+                self.finding(
+                    CompatibilityStatus::Unsupported,
                     "invalid-matrix-axis",
                     &axis_path,
                     "matrix axis is not a native identifier",
@@ -660,7 +730,8 @@ impl Analyzer {
                 }
             }
             if converted.is_empty() {
-                self.unsupported(
+                self.finding(
+                    CompatibilityStatus::Unsupported,
                     "empty-matrix-axis",
                     &axis_path,
                     "matrix axis has no importable values",
@@ -668,7 +739,8 @@ impl Analyzer {
                 );
             } else {
                 native.insert(axis.clone(), converted);
-                self.supported(
+                self.finding(
+                    CompatibilityStatus::Supported,
                     "static-matrix-axis",
                     axis_path,
                     "static matrix axis maps exactly to native matrix expansion",
@@ -689,7 +761,8 @@ impl Analyzer {
             let service_path = format!("{path}.{service_id}");
             self.unsupported_extras(&service_path, &service.extra);
             if !valid_identifier(service_id) {
-                self.unsupported(
+                self.finding(
+                    CompatibilityStatus::Unsupported,
                     "invalid-service-id",
                     &service_path,
                     "service id is not a native identifier",
@@ -697,7 +770,8 @@ impl Analyzer {
                 );
             }
             if service.image.is_none() {
-                self.unsupported(
+                self.finding(
+                    CompatibilityStatus::Unsupported,
                     "missing-service-image",
                     format!("{service_path}.image"),
                     "service does not declare an image",
@@ -743,7 +817,8 @@ impl Analyzer {
                 );
             }
             if service.credentials.is_some() {
-                self.unsafe_finding(
+                self.finding(
+                    CompatibilityStatus::Unsafe,
                     "service-registry-credentials",
                     format!("{service_path}.credentials"),
                     "raw GitHub service registry credentials cannot be imported",
@@ -754,7 +829,8 @@ impl Analyzer {
                 );
             }
             if service.volumes.is_some() {
-                self.unsafe_finding(
+                self.finding(
+                    CompatibilityStatus::Unsafe,
                     "service-host-volume",
                     format!("{service_path}.volumes"),
                     "service volume mounts can expose host or workspace paths",
@@ -783,7 +859,8 @@ impl Analyzer {
             return None;
         };
         if !is_full_sha256_image(&image) {
-            self.unsafe_finding(
+            self.finding(
+                CompatibilityStatus::Unsafe,
                 "mutable-service-image",
                 path,
                 format!("service image `{image}` is not pinned to a full lowercase sha256 digest"),
@@ -796,7 +873,8 @@ impl Analyzer {
             resolved: image.clone(),
             platform: "linux/amd64".to_owned(),
         });
-        self.supported(
+        self.finding(
+            CompatibilityStatus::Supported,
             "pinned-service-image",
             path,
             "immutable service image is preserved through an exact native lock requirement",
@@ -815,7 +893,8 @@ impl Analyzer {
                 if host == container {
                     container.parse::<u16>().ok()
                 } else {
-                    self.unsupported(
+                    self.finding(
+                        CompatibilityStatus::Unsupported,
                         "service-port-remap",
                         path,
                         "native service ports do not preserve differing host/container port remaps",
@@ -830,7 +909,8 @@ impl Analyzer {
             None
         };
         if let Some(port) = parsed.filter(|port| *port != 0) {
-            self.supported(
+            self.finding(
+                CompatibilityStatus::Supported,
                 "service-port",
                 path,
                 "static service port maps to a native isolated service port",

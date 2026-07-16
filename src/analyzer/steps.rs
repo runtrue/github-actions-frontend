@@ -5,6 +5,7 @@ use super::{
 use crate::{
     github::GithubStep,
     native::{NativeRun, NativeScript, NativeStep},
+    report::CompatibilityStatus,
     validation::{normalize_relative, safe_relative_path, valid_identifier},
 };
 use serde_yaml::Value as YamlValue;
@@ -23,7 +24,8 @@ impl Analyzer {
             if valid_identifier(&id) {
                 Some(id)
             } else {
-                self.unsupported(
+                self.finding(
+                    CompatibilityStatus::Unsupported,
                     "invalid-step-id",
                     format!("{path}.id"),
                     "step id is not a native identifier",
@@ -42,7 +44,8 @@ impl Analyzer {
         );
         let continue_on_error = if let Some(value) = &step.continue_on_error {
             if let Some(value) = value.as_bool() {
-                self.supported(
+                self.finding(
+                    CompatibilityStatus::Supported,
                     "continue-on-error",
                     format!("{path}.continue-on-error"),
                     "static step continue-on-error maps to the native step flag",
@@ -66,7 +69,8 @@ impl Analyzer {
         });
         let mapping = match (&step.run, &step.uses) {
             (Some(_), Some(_)) | (None, None) => {
-                self.unsupported(
+                self.finding(
+                    CompatibilityStatus::Unsupported,
                     "invalid-step-action",
                     &path,
                     "a step must contain exactly one of run or uses",
@@ -77,7 +81,8 @@ impl Analyzer {
             (Some(run), None) => {
                 if !step.inputs.is_empty() {
                     for input in step.inputs.keys() {
-                        self.unsupported(
+                        self.finding(
+                            CompatibilityStatus::Unsupported,
                             "run-with-input",
                             format!("{path}.with.{input}"),
                             "with inputs are not valid for native run steps",
@@ -91,7 +96,8 @@ impl Analyzer {
             }
             (None, Some(uses)) => {
                 if step.shell.is_some() {
-                    self.unsupported(
+                    self.finding(
+                        CompatibilityStatus::Unsupported,
                         "action-shell",
                         format!("{path}.shell"),
                         "shell is valid only for run steps",
@@ -99,7 +105,8 @@ impl Analyzer {
                     );
                 }
                 if step.working_directory.is_some() {
-                    self.unsupported(
+                    self.finding(
+                        CompatibilityStatus::Unsupported,
                         "action-working-directory",
                         format!("{path}.working-directory"),
                         "working-directory is not preserved for action steps",
@@ -116,7 +123,8 @@ impl Analyzer {
         }
         for (name, value) in mapping.env {
             if env.insert(name.clone(), value).is_some() {
-                self.unsupported(
+                self.finding(
+                    CompatibilityStatus::Unsupported,
                     "action-input-env-collision",
                     format!("{path}.env.{name}"),
                     "step environment collides with the normalized container-action input",
@@ -124,11 +132,17 @@ impl Analyzer {
                 );
             }
         }
+        let (uses, inputs, run) = match mapping.run {
+            NativeRun::Component(component) => (Some(component.reference), component.inputs, None),
+            run => (None, Default::default(), Some(run)),
+        };
         NativeStep {
             id,
             name,
             condition,
-            run: mapping.run,
+            uses,
+            inputs,
+            run,
             env,
             capabilities: mapping.capabilities,
             cache: mapping.cache,
@@ -151,7 +165,8 @@ impl Analyzer {
             return None;
         };
         if safe_relative_path(&value, false) {
-            self.supported(
+            self.finding(
+                CompatibilityStatus::Supported,
                 "working-directory",
                 path,
                 "static repository-relative working directory maps to native syntax",
@@ -159,7 +174,8 @@ impl Analyzer {
             );
             Some(normalize_relative(&value))
         } else {
-            self.unsafe_finding(
+            self.finding(
+                CompatibilityStatus::Unsafe,
                 "unsafe-working-directory",
                 path,
                 "working-directory is absolute, traversing, or host-relative",
@@ -185,7 +201,8 @@ impl Analyzer {
             return ActionMapping::placeholder();
         };
         if has_expression(script) {
-            self.unsafe_finding(
+            self.finding(
+                CompatibilityStatus::Unsafe,
                 "expression-shell-injection",
                 format!("{path}.run"),
                 "GitHub expression interpolation in shell source can inject executable syntax",
@@ -193,7 +210,8 @@ impl Analyzer {
             );
         }
         if script.contains('\0') {
-            self.unsupported(
+            self.finding(
+                CompatibilityStatus::Unsupported,
                 "nul-value",
                 format!("{path}.run"),
                 "shell source contains a NUL byte",
@@ -201,7 +219,8 @@ impl Analyzer {
             );
         }
         if contains_github_runtime(script) {
-            self.requires_github(
+            self.finding(
+                CompatibilityStatus::RequiresGithub,
                 "github-runner-command-channel",
                 format!("{path}.run"),
                 "script references GitHub runner files, commands, or hosted environment variables",
@@ -209,7 +228,8 @@ impl Analyzer {
             );
         }
         if has_privileged_or_host_feature(script) {
-            self.unsafe_finding(
+            self.finding(
+                CompatibilityStatus::Unsafe,
                 "privileged-shell-feature",
                 format!("{path}.run"),
                 "script requests privileged or host-level behavior denied by native isolation",
@@ -224,7 +244,8 @@ impl Analyzer {
             Some(value) if value.as_str() == Some("bash") => Some("bash"),
             Some(value) if value.as_str() == Some("sh") => Some("sh"),
             Some(value) if value.as_str().is_some_and(has_expression) => {
-                self.unsupported(
+                self.finding(
+                    CompatibilityStatus::Unsupported,
                     "dynamic-shell",
                     format!("{path}.shell"),
                     "dynamic shell selection is unsupported",
@@ -234,7 +255,8 @@ impl Analyzer {
             }
             Some(value) => {
                 let value = value.as_str().unwrap_or("<non-string>");
-                self.unsupported(
+                self.finding(
+                    CompatibilityStatus::Unsupported,
                     "unsupported-shell",
                     format!("{path}.shell"),
                     format!("shell `{value}` is not supported by the native compiler"),
@@ -248,7 +270,8 @@ impl Analyzer {
             && !contains_github_runtime(script)
             && !script.contains('\0');
         if mapped {
-            self.supported(
+            self.finding(
+                CompatibilityStatus::Supported,
                 "static-run-step",
                 format!("{path}.run"),
                 "static shell source maps to a native script step",
