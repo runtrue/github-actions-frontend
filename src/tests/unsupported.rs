@@ -109,3 +109,32 @@ fn non_finite_yaml_numbers_are_rejected() {
         .to_string();
     assert!(error.contains("numeric values must be finite"), "{error}");
 }
+
+#[test]
+fn repository_action_discovery_returns_only_canonical_full_commit_references() {
+    let commit = "a".repeat(40);
+    let source = format!(
+        "on: push\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: owner/action@{commit}\n      - uses: owner/action/subpath@{commit}\n      - uses: owner/action@main\n      - uses: actions/checkout@{commit}\n      - uses: docker://registry.example/tool@sha256:{}\n",
+        "b".repeat(64)
+    );
+    assert_eq!(
+        pinned_repository_action_references(&source).unwrap(),
+        vec![format!("owner/action@{commit}")]
+    );
+}
+
+#[test]
+fn missing_repository_resolution_remains_blocking() {
+    let reference = format!("owner/action@{}", "a".repeat(40));
+    let source = format!(
+        "on: push\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: {reference}\n"
+    );
+    let result = import_github_actions(&source, "missing.yml").unwrap();
+    assert!(!result.report.compatible);
+    assert!(result
+        .report
+        .findings
+        .iter()
+        .any(|finding| { finding.code == "unresolved-pinned-action" && finding.is_blocking() }));
+    assert!(result.lockfile_toml.is_none());
+}

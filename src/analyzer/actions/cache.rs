@@ -4,6 +4,7 @@ use crate::{
     native::{
         NativeCache, NativeCachePermissions, NativeCommand, NativeRun, NativeStepCapabilities,
     },
+    report::CompatibilityStatus,
     validation::{merge_cache_read, merge_cache_write, normalize_relative, safe_relative_path},
 };
 use runtrue_workflow_ast as ast;
@@ -37,7 +38,8 @@ impl Analyzer {
                         if safe_relative_path(candidate, true) && !candidate.starts_with('~') {
                             paths.push(normalize_relative(candidate));
                         } else {
-                            self.unsafe_finding(
+                            self.finding(
+                                CompatibilityStatus::Unsafe,
                                 "unsafe-cache-path",
                                 &input_path,
                                 format!("cache path `{candidate}` is not repository-relative"),
@@ -49,7 +51,8 @@ impl Analyzer {
                 "key" => {
                     if let Some(key) = static_string(value) {
                         has_key = !key.is_empty();
-                        self.emulated(
+                        self.finding(
+                            CompatibilityStatus::Emulated,
                             "cache-key-semantics",
                             &input_path,
                             "the static GitHub key is recorded in this report; native cache identity also binds capsule, platform, trust, and declared paths",
@@ -61,7 +64,8 @@ impl Analyzer {
                 }
                 "restore-keys" => {
                     if static_string(value).is_some() {
-                        self.emulated(
+                        self.finding(
+                            CompatibilityStatus::Emulated,
                             "cache-restore-prefix",
                             &input_path,
                             "GitHub restore-key prefix fallback is not identical to native trust-scoped fallback",
@@ -77,7 +81,8 @@ impl Analyzer {
                 }
                 "fail-on-cache-miss" | "lookup-only" | "enableCrossOsArchive" => {
                     if static_string(value).is_some() {
-                        self.emulated(
+                        self.finding(
+                            CompatibilityStatus::Emulated,
                             "cache-option",
                             &input_path,
                             format!("cache input `{name}` differs under the native cache adapter"),
@@ -91,7 +96,8 @@ impl Analyzer {
                         );
                     }
                 }
-                _ => self.unsupported(
+                _ => self.finding(
+                    CompatibilityStatus::Unsupported,
                     "unknown-cache-input",
                     input_path,
                     format!("cache input `{name}` is not implemented"),
@@ -100,7 +106,8 @@ impl Analyzer {
             }
         }
         if paths.is_empty() {
-            self.unsupported(
+            self.finding(
+                CompatibilityStatus::Unsupported,
                 "missing-cache-path",
                 format!("{path}.with.path"),
                 "cache action has no safe static path",
@@ -108,7 +115,8 @@ impl Analyzer {
             );
         }
         if !has_key {
-            self.unsupported(
+            self.finding(
+                CompatibilityStatus::Unsupported,
                 "missing-cache-key",
                 format!("{path}.with.key"),
                 "cache action has no non-empty static key",
@@ -137,7 +145,8 @@ impl Analyzer {
         };
         effects.permissions.cache_read = merge_cache_read(effects.permissions.cache_read, read);
         effects.permissions.cache_write = merge_cache_write(effects.permissions.cache_write, write);
-        self.emulated(
+        self.finding(
+            CompatibilityStatus::Emulated,
             "native-cache",
             format!("{path}.uses"),
             format!("`{reference}` maps to a native trust-scoped cache declaration"),
@@ -155,6 +164,7 @@ impl Analyzer {
                 mode,
             }),
             capabilities: Some(NativeStepCapabilities {
+                network: None,
                 cache: Some(NativeCachePermissions { read, write }),
                 artifacts: None,
                 secrets: Vec::new(),

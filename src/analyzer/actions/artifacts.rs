@@ -49,7 +49,8 @@ impl Analyzer {
                     {
                         artifact_path = Some(normalize_relative(&value));
                     } else {
-                        self.unsupported(
+                        self.finding(
+                            CompatibilityStatus::Unsupported,
                             "artifact-path-set",
                             &input_path,
                             "native job output mapping requires one static repository-relative path without globs",
@@ -70,7 +71,8 @@ impl Analyzer {
                 }
                 "if-no-files-found" => {
                     if static_string(value).is_some() {
-                        self.emulated(
+                        self.finding(
+                            CompatibilityStatus::Emulated,
                             "artifact-missing-policy",
                             input_path,
                             "native artifact capture reports missing declared outputs but does not reproduce every GitHub warning mode",
@@ -86,7 +88,8 @@ impl Analyzer {
                 }
                 "compression-level" | "overwrite" | "include-hidden-files" => {
                     if static_string(value).is_some() {
-                        self.emulated(
+                        self.finding(
+                            CompatibilityStatus::Emulated,
                             "artifact-option",
                             input_path,
                             format!("artifact input `{input}` is handled by native artifact storage with different packaging semantics"),
@@ -100,7 +103,8 @@ impl Analyzer {
                         );
                     }
                 }
-                _ => self.unsupported(
+                _ => self.finding(
+                    CompatibilityStatus::Unsupported,
                     "unknown-upload-artifact-input",
                     input_path,
                     format!("upload-artifact input `{input}` is not implemented"),
@@ -109,7 +113,8 @@ impl Analyzer {
             }
         }
         if !valid_identifier(&name) {
-            self.unsupported(
+            self.finding(
+                CompatibilityStatus::Unsupported,
                 "invalid-artifact-name",
                 format!("{path}.with.name"),
                 format!("artifact name `{name}` is not a native output identifier"),
@@ -120,7 +125,8 @@ impl Analyzer {
             );
         }
         if artifact_path.is_none() {
-            self.unsupported(
+            self.finding(
+                CompatibilityStatus::Unsupported,
                 "missing-artifact-path",
                 format!("{path}.with.path"),
                 "upload-artifact has no importable path",
@@ -128,7 +134,8 @@ impl Analyzer {
             );
         }
         match effects.outputs.entry(name) {
-            std::collections::btree_map::Entry::Occupied(entry) => self.unsupported(
+            std::collections::btree_map::Entry::Occupied(entry) => self.finding(
+                CompatibilityStatus::Unsupported,
                 "duplicate-artifact-name",
                 format!("{path}.with.name"),
                 format!(
@@ -148,7 +155,8 @@ impl Analyzer {
             }
         }
         effects.permissions.artifacts = effects.permissions.artifacts.max(ast::Access::Write);
-        self.emulated(
+        self.finding(
+            CompatibilityStatus::Emulated,
             "native-artifact-output",
             format!("{path}.uses"),
             format!("`{reference}` maps to a native immutable job artifact output"),
@@ -162,6 +170,7 @@ impl Analyzer {
             env: Default::default(),
             cache: None,
             capabilities: Some(NativeStepCapabilities {
+                network: None,
                 cache: None,
                 artifacts: Some(ast::Access::Write),
                 secrets: Vec::new(),
@@ -202,7 +211,8 @@ impl Analyzer {
                     Some("Replace download-artifact with a declared native dependency artifact binding.".to_owned()),
                 );
             } else {
-                self.unsupported(
+                self.finding(
+                    CompatibilityStatus::Unsupported,
                     "unknown-download-artifact-input",
                     input_path,
                     format!("download-artifact input `{input}` is not implemented"),
@@ -210,7 +220,8 @@ impl Analyzer {
                 );
             }
         }
-        self.requires_github(
+        self.finding(
+            CompatibilityStatus::RequiresGithub,
             "github-artifact-download",
             format!("{path}.uses"),
             format!("`{reference}` needs GitHub's artifact service and run lookup API"),

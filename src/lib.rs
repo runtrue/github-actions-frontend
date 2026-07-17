@@ -9,6 +9,7 @@ mod error;
 mod github;
 mod native;
 mod report;
+mod repository_action;
 mod strict_yaml;
 mod validation;
 
@@ -17,14 +18,20 @@ use github::GithubWorkflow;
 #[cfg(test)]
 use runtrue_workflow_ast as ast;
 use runtrue_workflow_frontend::{
-    PreparedWorkflowSource, WorkflowFrontendError, WorkflowFrontendErrorKind,
-    WorkflowFrontendOptions, WorkflowFrontendReport, WorkflowSourceFrontend,
+    PreparedWorkflowSource, SourceActionDeclaration, SourceActionDescriptors,
+    SourceActionProgramDeclaration, SourceActionResolutionRequest, SourceActionResolutionRequests,
+    WorkflowFrontendError, WorkflowFrontendErrorKind, WorkflowFrontendOptions,
+    WorkflowFrontendReport, WorkflowSourceFrontend,
 };
 use strict_yaml::validate_strict_yaml;
 
 pub use error::ImportError;
 pub use report::{
     CompatibilityFinding, CompatibilityReport, CompatibilityStatus, ImportResult, StatusCounts,
+};
+pub use repository_action::{
+    parse_repository_action_metadata, parse_runtrue_repository_action_metadata,
+    RepositoryActionMetadata, RuntrueRepositoryActionMetadata,
 };
 
 /// Generic frontend option understood by the GitHub Actions adapter.
@@ -42,7 +49,7 @@ impl WorkflowSourceFrontend for GithubActionsFrontend {
     }
 
     fn frontend_generation(&self) -> u32 {
-        2
+        3
     }
 
     fn discovery_roots(&self) -> &'static [&'static str] {
@@ -50,9 +57,98 @@ impl WorkflowSourceFrontend for GithubActionsFrontend {
     }
 
     fn supports(&self, workflow_path: &str) -> bool {
-        workflow_path.starts_with(".github/workflows/")
-            || workflow_path.ends_with(".github.yml")
-            || workflow_path.ends_with(".github.yaml")
+        let explicitly_native =
+            workflow_path.ends_with(".runtrue.yml") || workflow_path.ends_with(".runtrue.yaml");
+        !explicitly_native
+            && (workflow_path.starts_with(".github/workflows/")
+                || workflow_path.ends_with(".github.yml")
+                || workflow_path.ends_with(".github.yaml"))
+    }
+
+    fn action_resolution_requests(
+        &self,
+        source: &str,
+        _workflow_path: &str,
+    ) -> Result<SourceActionResolutionRequests, WorkflowFrontendError> {
+        let references =
+            pinned_repository_action_references(source).map_err(frontend_source_error)?;
+        let mut requests = SourceActionResolutionRequests::default();
+        for source_reference in references {
+            let (repository, revision) = source_reference.rsplit_once('@').ok_or_else(|| {
+                frontend_invalid_source("repository action reference has no exact revision")
+            })?;
+            let request = SourceActionResolutionRequest::new(
+                source_reference.clone(),
+                repository,
+                revision,
+                "",
+                vec![
+                    "runtrue-action.yml".to_owned(),
+                    "action.yml".to_owned(),
+                    "action.yaml".to_owned(),
+                ],
+            )
+            .map_err(|error| frontend_invalid_source(error.to_string()))?;
+            requests
+                .insert(request)
+                .map_err(|error| frontend_invalid_source(error.to_string()))?;
+        }
+        Ok(requests)
+    }
+
+    fn parse_action_descriptor(
+        &self,
+        request: &SourceActionResolutionRequest,
+        descriptors: &SourceActionDescriptors,
+    ) -> Result<SourceActionDeclaration, WorkflowFrontendError> {
+        let mut present = descriptors.iter();
+        let Some((descriptor_path, bytes)) = present.next() else {
+            return Err(frontend_invalid_source(
+                "repository action has no supported descriptor",
+            ));
+        };
+        if present.next().is_some() {
+            return Err(frontend_invalid_source(
+                "repository action has ambiguous descriptors",
+            ));
+        }
+
+        let mut declaration = if descriptor_path == "runtrue-action.yml" {
+            let metadata =
+                parse_runtrue_repository_action_metadata(bytes).map_err(frontend_source_error)?;
+            SourceActionDeclaration::new(
+                request.source_reference(),
+                descriptor_path,
+                SourceActionProgramDeclaration::Component {
+                    reference: metadata.component,
+                    signature_identity: metadata.signature_identity,
+                    interface: metadata.wit_world,
+                },
+            )
+            .map(|declaration| (declaration, metadata.inputs))
+        } else {
+            let metadata =
+                parse_repository_action_metadata(bytes).map_err(frontend_source_error)?;
+            SourceActionDeclaration::new(
+                request.source_reference(),
+                descriptor_path,
+                SourceActionProgramDeclaration::ContainerBuild {
+                    build_file: metadata.dockerfile,
+                    entrypoint: metadata.entrypoint,
+                    arguments: metadata.args,
+                },
+            )
+            .map(|declaration| (declaration, metadata.inputs))
+        }
+        .map_err(|error| frontend_invalid_source(error.to_string()))?;
+
+        for (name, input) in declaration.1 {
+            declaration
+                .0
+                .insert_input(name, input)
+                .map_err(|error| frontend_invalid_source(error.to_string()))?;
+        }
+        Ok(declaration.0)
     }
 
     fn prepare(
@@ -61,20 +157,8 @@ impl WorkflowSourceFrontend for GithubActionsFrontend {
         workflow_path: &str,
         options: &WorkflowFrontendOptions,
     ) -> Result<PreparedWorkflowSource, WorkflowFrontendError> {
-        let imported = import_github_actions_with_default_job_container_image(
-            source,
-            workflow_path,
-            options
-                .value(DEFAULT_JOB_CONTAINER_IMAGE_OPTION)
-                .map(str::to_owned),
-        )
-        .map_err(|error| {
-            WorkflowFrontendError::new(
-                WorkflowFrontendErrorKind::InvalidSource,
-                "github-actions.invalid-source",
-                error.to_string(),
-            )
-        })?;
+        let imported = import_github_actions_with_options(source, workflow_path, options.clone())
+            .map_err(frontend_source_error)?;
         let native_yaml = imported.native_yaml.ok_or_else(|| {
             let blockers = imported
                 .report
@@ -85,15 +169,14 @@ impl WorkflowSourceFrontend for GithubActionsFrontend {
                 .take(8)
                 .collect::<Vec<_>>()
                 .join(", ");
-            let detail = if blockers.is_empty() {
-                "compatibility analysis produced no executable workflow".to_owned()
-            } else {
-                blockers
-            };
             WorkflowFrontendError::new(
                 WorkflowFrontendErrorKind::IncompatibleSource,
                 "github-actions.incompatible-source",
-                detail,
+                if blockers.is_empty() {
+                    "compatibility analysis produced no executable workflow".to_owned()
+                } else {
+                    blockers
+                },
             )
         })?;
         let report_bytes = serde_json::to_vec(&imported.report).map_err(|error| {
@@ -114,29 +197,91 @@ impl WorkflowSourceFrontend for GithubActionsFrontend {
     }
 }
 
+fn frontend_source_error(error: ImportError) -> WorkflowFrontendError {
+    frontend_invalid_source(error.to_string())
+}
+
+fn frontend_invalid_source(detail: impl Into<String>) -> WorkflowFrontendError {
+    WorkflowFrontendError::new(
+        WorkflowFrontendErrorKind::InvalidSource,
+        "github-actions.invalid-source",
+        detail,
+    )
+}
+
 /// Maximum accepted GitHub Actions workflow source size.
 pub const MAX_GITHUB_WORKFLOW_BYTES: usize = 1024 * 1024;
 
-/// Analyze and, when safe and fully representable, import a GitHub Actions
-/// workflow into native Runtrue YAML.
 pub fn import_github_actions(
     source: &str,
     source_name: impl Into<String>,
 ) -> Result<ImportResult, ImportError> {
-    import_github_actions_with_default_job_container_image(source, source_name, None)
+    import_github_actions_with_options(source, source_name, WorkflowFrontendOptions::default())
 }
 
+#[cfg(test)]
 fn import_github_actions_with_default_job_container_image(
     source: &str,
     source_name: impl Into<String>,
     default_job_container_image: Option<String>,
+) -> Result<ImportResult, ImportError> {
+    let mut options = WorkflowFrontendOptions::default();
+    if let Some(image) = default_job_container_image {
+        options
+            .set(DEFAULT_JOB_CONTAINER_IMAGE_OPTION, image)
+            .map_err(|error| ImportError::GeneratedWorkflow(error.to_string()))?;
+    }
+    import_github_actions_with_options(source, source_name, options)
+}
+
+pub fn import_github_actions_with_options(
+    source: &str,
+    source_name: impl Into<String>,
+    options: WorkflowFrontendOptions,
 ) -> Result<ImportResult, ImportError> {
     if source.len() > MAX_GITHUB_WORKFLOW_BYTES {
         return Err(ImportError::TooLarge);
     }
     validate_strict_yaml(source)?;
     let workflow: GithubWorkflow = serde_yaml::from_str(source)?;
-    Analyzer::new(source_name.into(), default_job_container_image).analyze(workflow)
+    Analyzer::new(source_name.into(), options).analyze(workflow)
+}
+
+pub fn pinned_repository_action_references(source: &str) -> Result<Vec<String>, ImportError> {
+    if source.len() > MAX_GITHUB_WORKFLOW_BYTES {
+        return Err(ImportError::TooLarge);
+    }
+    validate_strict_yaml(source)?;
+    let workflow: GithubWorkflow = serde_yaml::from_str(source)?;
+    let mut references = std::collections::BTreeSet::new();
+    for job in workflow.jobs.values() {
+        for step in &job.steps {
+            let Some(reference) = step.uses.as_ref().and_then(serde_yaml::Value::as_str) else {
+                continue;
+            };
+            let Some((action, selector)) = reference.rsplit_once('@') else {
+                continue;
+            };
+            let normalized = action.to_ascii_lowercase();
+            if matches!(
+                normalized.as_str(),
+                "actions/checkout"
+                    | "actions/cache"
+                    | "actions/cache/restore"
+                    | "actions/cache/save"
+                    | "actions/upload-artifact"
+                    | "actions/download-artifact"
+                    | "docker/build-push-action"
+                    | "docker/setup-buildx-action"
+            ) || !validation::is_full_git_commit(selector)
+                || !analyzer::is_canonical_repository_action(action)
+            {
+                continue;
+            }
+            references.insert(reference.to_owned());
+        }
+    }
+    Ok(references.into_iter().collect())
 }
 
 #[cfg(test)]
