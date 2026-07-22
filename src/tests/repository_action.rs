@@ -80,13 +80,13 @@ runs:
   using: wasm
   component: wasm://ghcr.io/runtrue/backport@sha256:{}
   signature-identity: release@runtrue.dev
-  wit-world: runtrue:action/run@1.0.0
+  wit-world: wasi:cli/command@0.3.0
 "#,
         "a".repeat(64)
     );
     let metadata = parse_runtrue_repository_action_metadata(source.as_bytes()).unwrap();
     assert_eq!(metadata.signature_identity, "release@runtrue.dev");
-    assert_eq!(metadata.wit_world, "runtrue:action/run@1.0.0");
+    assert_eq!(metadata.wit_world, "wasi:cli/command@0.3.0");
     assert_eq!(
         metadata.inputs["config-path"].default_value(),
         Some(".github/backport.yml")

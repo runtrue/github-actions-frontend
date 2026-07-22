@@ -125,7 +125,10 @@ pub fn parse_runtrue_repository_action_metadata(
         ));
     }
     validate_text("runs.signature-identity", &metadata.runs.signature_identity)?;
-    if metadata.runs.wit_world != "runtrue:action/run@1.0.0" {
+    if !matches!(
+        metadata.runs.wit_world.as_str(),
+        "wasi:cli/command@0.3.0" | "wasi:cli/command@0.2" | "runtrue:action/run@1.0.0"
+    ) {
         return Err(ImportError::RepositoryActionMetadata(
             "runs.wit-world is not supported by this runtime generation".to_owned(),
         ));
