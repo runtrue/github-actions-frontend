@@ -72,7 +72,7 @@ function proxyRequest(request, response, backendOrigin) {
   request.pipe(upstream);
 }
 
-export function createRuntrueServer({ backendOrigin = process.env.BACKEND_ORIGIN || "http://127.0.0.1:8080" } = {}) {
+export function createGitHubActionsFrontendServer({ backendOrigin = process.env.BACKEND_ORIGIN || "http://127.0.0.1:8080" } = {}) {
   return createServer((request, response) => {
     const url = new URL(request.url, "http://runtrue.local");
     if (url.pathname === "/frontend-healthz") {
@@ -116,8 +116,8 @@ export function createRuntrueServer({ backendOrigin = process.env.BACKEND_ORIGIN
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const port = Number.parseInt(process.env.PORT || "3000", 10);
-  const server = createRuntrueServer();
-  server.listen(port, "0.0.0.0", () => process.stdout.write(`Runtrue frontend listening on ${port}\n`));
+  const server = createGitHubActionsFrontendServer();
+  server.listen(port, "0.0.0.0", () => process.stdout.write(`Runtrue GitHub Actions UI listening on ${port}\n`));
   const stop = () => server.close(() => process.exit(0));
   process.on("SIGTERM", stop);
   process.on("SIGINT", stop);

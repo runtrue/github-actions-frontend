@@ -1,9 +1,12 @@
 # Runtrue GitHub Actions frontend
 
-This repository contains Runtrue's strict, fail-closed GitHub Actions workflow
-frontend. It analyzes GitHub Actions YAML, reports compatibility findings, and
-translates supported workflows into native Runtrue workflow YAML and lockfile
-material.
+This repository owns Runtrue's GitHub Actions-specific product surface:
+
+- the strict, fail-closed workflow frontend that analyzes GitHub Actions YAML,
+  reports compatibility findings, and translates supported workflows into
+  native Runtrue workflow YAML and lockfile material; and
+- the browser UI and same-origin proxy used to install GitHub repositories,
+  manage GitHub-backed configuration, and inspect workflow runs.
 
 The adapter is not an execution engine. Runtrue core independently validates
 the adapter's bounded output and derives its digests, configuration identity,
@@ -19,6 +22,14 @@ types have a single reviewed source.
 The adapter identity is `runtrue.github-actions`; its current frontend
 generation is `2`, and the supported frontend contract generation is `2`.
 
+The browser UI is versioned and deployed independently from Runtrue core. Its
+backend contract is documented in [`ui/README.md`](ui/README.md).
+
+Before changing this repository to public visibility, make the five pinned
+Runtrue core crates in `Cargo.toml` available to anonymous clean checkouts.
+Repository visibility alone is not sufficient while those exact Git revisions
+remain private.
+
 ## Development
 
 Use Rust 1.94 or newer, then run:
@@ -27,6 +38,14 @@ Use Rust 1.94 or newer, then run:
 cargo fmt --all -- --check
 cargo test --locked
 cargo clippy --all-targets --locked -- -D warnings
+```
+
+Use Node.js 22 or newer for the browser UI:
+
+```text
+npm --prefix ui test
+node --check ui/public/app.js
+docker build -f ui/Containerfile ui
 ```
 
 GitHub Actions workflow files are deliberately not installed in this

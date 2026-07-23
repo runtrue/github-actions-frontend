@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import test from "node:test";
-import { createRuntrueServer } from "../server.js";
+import { createGitHubActionsFrontendServer } from "../server.js";
 
 async function listen(server) {
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -16,7 +16,7 @@ async function close(server) {
 test("serves the full backend-supported POC surface with a strict CSP", async (t) => {
   const backend = createServer((_request, response) => response.end());
   const backendPort = await listen(backend);
-  const frontend = createRuntrueServer({ backendOrigin: `http://127.0.0.1:${backendPort}` });
+  const frontend = createGitHubActionsFrontendServer({ backendOrigin: `http://127.0.0.1:${backendPort}` });
   const frontendPort = await listen(frontend);
   t.after(() => Promise.all([close(frontend), close(backend)]));
 
@@ -111,7 +111,7 @@ test("proxies backend cookies, redirects, and request bodies", async (t) => {
     });
   });
   const backendPort = await listen(backend);
-  const frontend = createRuntrueServer({ backendOrigin: `http://127.0.0.1:${backendPort}` });
+  const frontend = createGitHubActionsFrontendServer({ backendOrigin: `http://127.0.0.1:${backendPort}` });
   const frontendPort = await listen(frontend);
   t.after(() => Promise.all([close(frontend), close(backend)]));
 
