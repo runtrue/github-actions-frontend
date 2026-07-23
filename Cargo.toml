@@ -15,11 +15,17 @@ runtrue-lock = { git = "https://github.com/runtrue/runtrue", rev = "73a08bb93385
 runtrue-model = { git = "https://github.com/runtrue/runtrue", rev = "73a08bb9338503118baac57181ab2cb576b5489b" }
 runtrue-workflow-frontend = { git = "https://github.com/runtrue/runtrue", rev = "73a08bb9338503118baac57181ab2cb576b5489b" }
 runtrue-workflow-ast = { git = "https://github.com/runtrue/runtrue", rev = "73a08bb9338503118baac57181ab2cb576b5489b" }
+base64ct = { version = "=1.6.0", features = ["std"] }
+hex = "=0.4.3"
+hmac = "=0.12.1"
 serde = { version = "=1.0.228", features = ["derive"] }
 serde_json = "=1.0.150"
 serde_yaml = "=0.9.34"
+sha2 = "=0.10.8"
 thiserror = "=1.0.61"
 toml = "=0.8.23"
+ureq = { version = "=3.3.0", default-features = false, features = ["json", "rustls"] }
+zeroize = "=1.7.0"
 
 [dev-dependencies]
 tempfile = "=3.10.1"

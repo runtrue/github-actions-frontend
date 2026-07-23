@@ -691,7 +691,7 @@ mod installation_validation {
 
 mod checks {
     use super::*;
-    use crate::github::checks::check_body;
+    use crate::provider::checks::check_body;
 
     #[test]
     fn backend_generated_check_markdown_is_rendered_without_unescaping_dynamic_content() {
