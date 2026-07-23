@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Adopt the GitHub Actions browser UI and same-origin backend proxy from the
+  Runtrue core repository while preserving its source history.
+- Package the UI as an independently versioned OCI image.
 - Merge strict YAML integrity and expansion-budget validation into one pass.
 - Remove derived compatibility-report fields and bump the frontend generation
   to 2 so the report-schema change cannot reuse prior approval identity.
