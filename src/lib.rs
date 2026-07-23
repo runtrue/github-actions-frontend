@@ -8,8 +8,10 @@ mod analyzer;
 mod error;
 mod github;
 mod native;
+mod provider;
 mod report;
 mod repository_action;
+mod source;
 mod strict_yaml;
 mod validation;
 
@@ -26,6 +28,7 @@ use runtrue_workflow_frontend::{
 use strict_yaml::validate_strict_yaml;
 
 pub use error::ImportError;
+pub use provider::*;
 pub use report::{
     CompatibilityFinding, CompatibilityReport, CompatibilityStatus, ImportResult, StatusCounts,
 };
@@ -33,6 +36,7 @@ pub use repository_action::{
     parse_repository_action_metadata, parse_runtrue_repository_action_metadata,
     RepositoryActionMetadata, RuntrueRepositoryActionMetadata,
 };
+pub use source::*;
 
 /// Generic frontend option understood by the GitHub Actions adapter.
 pub const DEFAULT_JOB_CONTAINER_IMAGE_OPTION: &str =
