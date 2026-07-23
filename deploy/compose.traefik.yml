@@ -1,0 +1,11 @@
+services:
+  frontend:
+    ports: !reset []
+
+  traefik:
+    environment:
+      RUNTRUE_EDGE_UPSTREAM: http://frontend:3000
+      RUNTRUE_EDGE_HEALTH_PATH: /frontend-healthz
+    depends_on:
+      frontend:
+        condition: service_healthy

@@ -10,11 +10,11 @@ readme = "README.md"
 description = "Strict, fail-closed GitHub Actions workflow frontend for Runtrue"
 
 [dependencies]
-runtrue-compiler = { git = "https://github.com/runtrue/runtrue", rev = "73a08bb9338503118baac57181ab2cb576b5489b" }
-runtrue-lock = { git = "https://github.com/runtrue/runtrue", rev = "73a08bb9338503118baac57181ab2cb576b5489b" }
-runtrue-model = { git = "https://github.com/runtrue/runtrue", rev = "73a08bb9338503118baac57181ab2cb576b5489b" }
-runtrue-workflow-frontend = { git = "https://github.com/runtrue/runtrue", rev = "73a08bb9338503118baac57181ab2cb576b5489b" }
-runtrue-workflow-ast = { git = "https://github.com/runtrue/runtrue", rev = "73a08bb9338503118baac57181ab2cb576b5489b" }
+runtrue-compiler = { git = "https://github.com/runtrue/runtrue", rev = "97aa4b9d54ee1c387349d13d1abde632cce331ab" }
+runtrue-lock = { git = "https://github.com/runtrue/runtrue", rev = "97aa4b9d54ee1c387349d13d1abde632cce331ab" }
+runtrue-model = { git = "https://github.com/runtrue/runtrue", rev = "97aa4b9d54ee1c387349d13d1abde632cce331ab" }
+runtrue-workflow-frontend = { git = "https://github.com/runtrue/runtrue", rev = "97aa4b9d54ee1c387349d13d1abde632cce331ab" }
+runtrue-workflow-ast = { git = "https://github.com/runtrue/runtrue", rev = "97aa4b9d54ee1c387349d13d1abde632cce331ab" }
 base64ct = { version = "=1.6.0", features = ["std"] }
 hex = "=0.4.3"
 hmac = "=0.12.1"
@@ -39,3 +39,78 @@ pedantic = { level = "allow", priority = -1 }
 
 [workspace]
 resolver = "2"
+members = ["product/server"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+rust-version = "1.94"
+
+[workspace.dependencies]
+runtrue-artifacts = { git = "https://github.com/runtrue/runtrue", rev = "97aa4b9d54ee1c387349d13d1abde632cce331ab" }
+runtrue-autoscaler = { git = "https://github.com/runtrue/runtrue", rev = "97aa4b9d54ee1c387349d13d1abde632cce331ab" }
+runtrue-auth = { git = "https://github.com/runtrue/runtrue", rev = "97aa4b9d54ee1c387349d13d1abde632cce331ab" }
+runtrue-audit = { git = "https://github.com/runtrue/runtrue", rev = "97aa4b9d54ee1c387349d13d1abde632cce331ab" }
+runtrue-cache = { git = "https://github.com/runtrue/runtrue", rev = "97aa4b9d54ee1c387349d13d1abde632cce331ab" }
+runtrue-attest = { git = "https://github.com/runtrue/runtrue", rev = "97aa4b9d54ee1c387349d13d1abde632cce331ab" }
+runtrue-compiler = { git = "https://github.com/runtrue/runtrue", rev = "97aa4b9d54ee1c387349d13d1abde632cce331ab" }
+runtrue-control-plane = { git = "https://github.com/runtrue/runtrue", rev = "97aa4b9d54ee1c387349d13d1abde632cce331ab" }
+runtrue-git = { git = "https://github.com/runtrue/runtrue", rev = "97aa4b9d54ee1c387349d13d1abde632cce331ab" }
+runtrue-gha-import = { path = "." }
+runtrue-lifecycle = { git = "https://github.com/runtrue/runtrue", rev = "97aa4b9d54ee1c387349d13d1abde632cce331ab" }
+runtrue-lock = { git = "https://github.com/runtrue/runtrue", rev = "97aa4b9d54ee1c387349d13d1abde632cce331ab" }
+runtrue-model = { git = "https://github.com/runtrue/runtrue", rev = "97aa4b9d54ee1c387349d13d1abde632cce331ab" }
+runtrue-oidc = { git = "https://github.com/runtrue/runtrue", rev = "97aa4b9d54ee1c387349d13d1abde632cce331ab" }
+runtrue-policy = { git = "https://github.com/runtrue/runtrue", rev = "97aa4b9d54ee1c387349d13d1abde632cce331ab" }
+runtrue-protocol = { git = "https://github.com/runtrue/runtrue", rev = "97aa4b9d54ee1c387349d13d1abde632cce331ab" }
+runtrue-replay = { git = "https://github.com/runtrue/runtrue", rev = "97aa4b9d54ee1c387349d13d1abde632cce331ab" }
+runtrue-runner = { git = "https://github.com/runtrue/runtrue", rev = "97aa4b9d54ee1c387349d13d1abde632cce331ab" }
+runtrue-runner-core = { git = "https://github.com/runtrue/runtrue", rev = "97aa4b9d54ee1c387349d13d1abde632cce331ab" }
+runtrue-scheduler = { git = "https://github.com/runtrue/runtrue", rev = "97aa4b9d54ee1c387349d13d1abde632cce331ab" }
+runtrue-scm = { git = "https://github.com/runtrue/runtrue", rev = "97aa4b9d54ee1c387349d13d1abde632cce331ab" }
+runtrue-secrets = { git = "https://github.com/runtrue/runtrue", rev = "97aa4b9d54ee1c387349d13d1abde632cce331ab" }
+runtrue-storage = { git = "https://github.com/runtrue/runtrue", rev = "97aa4b9d54ee1c387349d13d1abde632cce331ab" }
+runtrue-trusted-planner = { git = "https://github.com/runtrue/runtrue", rev = "97aa4b9d54ee1c387349d13d1abde632cce331ab" }
+runtrue-update = { git = "https://github.com/runtrue/runtrue", rev = "97aa4b9d54ee1c387349d13d1abde632cce331ab" }
+runtrue-workflow-ast = { git = "https://github.com/runtrue/runtrue", rev = "97aa4b9d54ee1c387349d13d1abde632cce331ab" }
+runtrue-workflow-frontend = { git = "https://github.com/runtrue/runtrue", rev = "97aa4b9d54ee1c387349d13d1abde632cce331ab" }
+runtrue-workflow-ir = { git = "https://github.com/runtrue/runtrue", rev = "97aa4b9d54ee1c387349d13d1abde632cce331ab" }
+axum = "=0.6.20"
+base64ct = { version = "=1.6.0", features = ["std"] }
+chacha20poly1305 = "=0.10.1"
+clap = { version = "=4.5.4", features = ["derive"] }
+ed25519-dalek = { version = "=2.1.1", features = ["rand_core"] }
+hex = "=0.4.3"
+hmac = "=0.12.1"
+hkdf = { version = "=0.12.4", default-features = false }
+libc = "=0.2.186"
+nix = { version = "=0.27.1", features = ["fs", "process", "signal", "socket"] }
+prost = "=0.14.4"
+prost-types = "=0.14.4"
+rand_core = { version = "=0.6.4", features = ["getrandom"] }
+rcgen = { version = "=0.14.8", default-features = false, features = ["crypto", "ring", "pem", "x509-parser", "zeroize"] }
+rusqlite = { version = "=0.31.0", features = ["bundled"] }
+rustls-pki-types = "=1.15.0"
+serde = { version = "=1.0.228", features = ["derive"] }
+serde_json = "=1.0.150"
+sha2 = "=0.10.8"
+sqlx = { version = "=0.8.6", default-features = false, features = ["postgres", "runtime-tokio-rustls"] }
+tempfile = "=3.10.1"
+thiserror = "=1.0.61"
+time = { version = "=0.3.47", features = ["formatting"] }
+tokio = { version = "=1.52.0", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-stream = "=0.1.18"
+tonic = { version = "=0.14.6", features = ["transport", "tls-ring"] }
+tower = { version = "=0.4.13", features = ["util"] }
+ureq = { version = "=3.3.0", default-features = false, features = ["json", "rustls"] }
+x25519-dalek = { version = "=2.0.1", default-features = false, features = ["static_secrets", "zeroize"] }
+x509-parser = { version = "=0.18.1", default-features = false, features = ["verify"] }
+zeroize = "=1.7.0"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "allow", priority = -1 }
