@@ -770,6 +770,190 @@ async fn github_browser_manages_organization_secrets_and_variables_in_tenant_sco
 }
 
 #[tokio::test]
+async fn github_repository_settings_include_effective_inherited_configuration() {
+    let (control, oidc, _, _, application) = github_human_application();
+    control
+        .create_repository(&tenant_repository(
+            "repo-effective-settings",
+            "tenant-browser",
+            "effective-settings",
+        ))
+        .unwrap();
+    let installation = runtrue_control_plane::GitHubInstallationRecord {
+        installation: runtrue_control_plane::ScmInstallationRecord {
+            id: "github-installation-effective-settings".to_owned(),
+            tenant_id: "tenant-browser".to_owned(),
+            provider: "github".to_owned(),
+            external_id: "9001".to_owned(),
+            credential_reference: "provider://github-app/effective-settings".to_owned(),
+            permissions: json!({
+                "checks": "write",
+                "contents": "read",
+                "metadata": "read",
+                "pull_requests": "read"
+            }),
+            status: "active".to_owned(),
+            created_unix_ms: 1,
+            updated_unix_ms: 1,
+        },
+        web_origin: "https://github.example.com".to_owned(),
+        api_origin: "https://github.example.com/api/v3".to_owned(),
+        account_external_id: "7001".to_owned(),
+        account_login: "ci".to_owned(),
+        account_kind: runtrue_control_plane::GitHubAccountKind::Organization,
+        repository_selection: runtrue_control_plane::GitHubRepositorySelection::Selected,
+        lifecycle_generation: 1,
+        synchronized_unix_ms: 1,
+        suspended_unix_ms: None,
+        revoked_unix_ms: None,
+        version: 1,
+    };
+    control
+        .reconcile_github_installation(&runtrue_control_plane::ReconcileGitHubInstallation {
+            installation: installation.clone(),
+            selected_repositories: Vec::new(),
+            expected_version: None,
+            now_unix_ms: 1,
+        })
+        .unwrap();
+    control
+        .link_scm_repository(&runtrue_control_plane::ScmRepositoryLinkRecord {
+            repository_id: "repo-effective-settings".to_owned(),
+            tenant_id: "tenant-browser".to_owned(),
+            installation_id: installation.installation.id,
+            external_repository_id: "4201".to_owned(),
+            clone_url: "https://github.example.com/ci/effective-settings.git".to_owned(),
+            status: "active".to_owned(),
+            created_unix_ms: 1,
+            updated_unix_ms: 1,
+        })
+        .unwrap();
+    control
+        .put_configuration_project(&runtrue_control_plane::PutConfigurationProject {
+            id: "project-ai-review".to_owned(),
+            tenant_id: "tenant-browser".to_owned(),
+            name: "ai-review".to_owned(),
+            description: "Automated review credentials".to_owned(),
+            status: "active".to_owned(),
+            expected_version: 0,
+            targets: vec![runtrue_control_plane::ConfigurationProjectTarget {
+                kind: runtrue_control_plane::ConfigurationProjectTargetKind::ScmAccount,
+                id: "7001".to_owned(),
+                created_unix_ms: 1,
+            }],
+            updated_unix_ms: 1,
+        })
+        .unwrap();
+    for (id, scope, name) in [
+        (
+            "secret-project-review",
+            "project:project-ai-review",
+            "BOBSHELL_API_KEY",
+        ),
+        (
+            "secret-workspace-shared",
+            "tenant:tenant-browser",
+            "SHARED_TOKEN",
+        ),
+        (
+            "secret-repository-direct",
+            "repository:repo-effective-settings",
+            "REPOSITORY_TOKEN",
+        ),
+    ] {
+        control
+            .store_secret_metadata(&runtrue_control_plane::SecretMetadataReference {
+                id: id.to_owned(),
+                tenant_id: "tenant-browser".to_owned(),
+                scope: scope.to_owned(),
+                name: name.to_owned(),
+                provider: "built-in".to_owned(),
+                provider_reference: None,
+                secret_type: "opaque".to_owned(),
+                status: "active".to_owned(),
+                current_version: Some(1),
+                created_unix_ms: 1,
+                updated_unix_ms: 1,
+            })
+            .unwrap();
+    }
+    control
+        .put_variable_idempotent(
+            "workspace-region",
+            "tenant-browser",
+            "tenant:tenant-browser",
+            "REGION",
+            json!("us-east"),
+            1,
+        )
+        .unwrap();
+    control
+        .put_variable_idempotent(
+            "workspace-timeout",
+            "tenant-browser",
+            "tenant:tenant-browser",
+            "TIMEOUT",
+            json!(30),
+            1,
+        )
+        .unwrap();
+    control
+        .put_variable_idempotent(
+            "repository-region",
+            "tenant-browser",
+            "repository:repo-effective-settings",
+            "REGION",
+            json!("us-west"),
+            2,
+        )
+        .unwrap();
+
+    let (login_cookie, oidc_state, nonce) = begin_human_login(&application).await;
+    oidc.respond(&nonce, "subject-browser");
+    let login = finish_human_login(&application, &login_cookie, &oidc_state).await;
+    let cookies = browser_cookie_header(&login);
+    let response = application
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/ui/repositories/repo-effective-settings/settings")
+                .header("cookie", &cookies)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["cache-control"], "no-store");
+    let settings = json_body(response).await;
+    let secrets = settings["effective_secrets"].as_array().unwrap();
+    let secret = |name: &str| {
+        secrets
+            .iter()
+            .find(|secret| secret["name"] == name)
+            .unwrap()
+    };
+    assert_eq!(secret("BOBSHELL_API_KEY")["source_kind"], "project");
+    assert_eq!(secret("BOBSHELL_API_KEY")["source_name"], "ai-review");
+    assert_eq!(secret("BOBSHELL_API_KEY")["inherited"], true);
+    assert_eq!(secret("SHARED_TOKEN")["source_kind"], "workspace");
+    assert_eq!(secret("REPOSITORY_TOKEN")["source_kind"], "repository");
+    assert_eq!(secret("REPOSITORY_TOKEN")["inherited"], false);
+
+    let variables = settings["effective_variables"].as_array().unwrap();
+    let variable = |name: &str| {
+        variables
+            .iter()
+            .find(|variable| variable["name"] == name)
+            .unwrap()
+    };
+    assert_eq!(variable("REGION")["value"], "us-west");
+    assert_eq!(variable("REGION")["source_kind"], "repository");
+    assert_eq!(variable("TIMEOUT")["value"], 30);
+    assert_eq!(variable("TIMEOUT")["source_kind"], "workspace");
+    assert_eq!(variable("TIMEOUT")["inherited"], true);
+}
+
+#[tokio::test]
 async fn github_secret_inventory_and_project_retargeting_enforce_each_target_policy() {
     let (control, oidc, _, _, application) = github_human_application();
     for (id, name) in [
@@ -1066,6 +1250,7 @@ async fn browser_run_detail_requires_a_session_and_returns_tenant_scoped_jobs() 
     assert_eq!(detail["jobs"][0]["requirements"]["isolation"], "microvm");
     assert_eq!(detail["logs"], json!([]));
     assert_eq!(detail["logsTruncated"], false);
+    assert!(detail.get("webhookEvent").is_none());
 
     seed_active_tenant(&control, "tenant-other");
     control

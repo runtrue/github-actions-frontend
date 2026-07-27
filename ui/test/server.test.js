@@ -27,12 +27,14 @@ test("serves the full backend-supported POC surface with a strict CSP", async (t
   assert.match(response.headers.get("content-security-policy"), /script-src 'self'/);
   assert.match(response.headers.get("content-security-policy"), /img-src 'self'/);
   assert.doesNotMatch(response.headers.get("content-security-policy"), /github\.ibm\.com/);
+  assert.match(html, /data-view="overview"/);
+  assert.match(html, /id="overview-attention-list"/);
   assert.match(html, /data-view="repositories"/);
   assert.match(html, /data-view="github"/);
   assert.match(html, /data-view="runs"/);
   assert.match(html, /data-view="approvals"/);
   assert.match(html, /data-view="repository"/);
-  assert.match(html, /data-view="organization"/);
+  assert.doesNotMatch(html, /data-view="organization"/);
   assert.match(html, /data-view="secrets"/);
   assert.match(html, /data-view="runners"/);
   assert.match(html, /data-view="api-tokens"/);
@@ -48,8 +50,13 @@ test("serves the full backend-supported POC surface with a strict CSP", async (t
   assert.match(html, /data-repository-section="secrets"/);
   assert.match(html, /data-repository-section="variables"/);
   assert.match(html, /data-repository-section="settings"/);
-  assert.match(html, /id="organization-secrets-body"/);
-  assert.match(html, /id="organization-variables-body"/);
+  assert.match(html, /Secrets available to jobs/);
+  assert.match(html, /Variables available to jobs/);
+  assert.match(html, /id="approval-review-view"/);
+  assert.match(html, /id="approval-review-content"/);
+  assert.match(html, /id="approval-decision-title"/);
+  assert.doesNotMatch(html, /data-view-target="organization"/);
+  assert.match(html, /id="workspace-variables-body"/);
   assert.match(html, /id="uninstall-repository-dialog"/);
   assert.match(html, /class="github-danger-zone"/);
   assert.match(html, /id="repository-setting-dialog"/);
@@ -144,15 +151,20 @@ test("browser script references existing unique controls", async () => {
   assert.match(script, /function runSourceCardMarkup\(run\)/);
   assert.match(script, /function repositoryRoute\(repository = state\.activeRepository, section = state\.repositorySection\)/);
   assert.match(script, /function restoreRoute\(\)/);
+  assert.match(script, /if \(view === "organization"\) view = "secrets"/);
   assert.match(script, /history\[replace \? "replaceState" : "pushState"\]/);
   assert.match(script, /function refreshRepositoryRuns\(\)/);
-  assert.match(script, /"organization", "secrets", "github"/);
+  assert.match(script, /"repository", "secrets", "github"/);
   assert.match(script, /function retryRun\(id, button\)/);
   assert.match(script, /\/api\/v1\/ui\/runs\/\$\{encodeURIComponent\(id\)\}\/retry/);
   assert.doesNotMatch(script, /Retry support is coming soon/);
   assert.match(script, /\/api\/v1\/ui\/repositories\//);
   assert.match(script, /function loadRepositorySettings/);
-  assert.match(script, /function loadOrganizationSettings/);
+  assert.match(script, /settings\.effective_secrets \|\| settings\.secrets/);
+  assert.match(script, /settings\.effective_variables \|\| settings\.variables/);
+  assert.match(script, /function closeApprovalReview/);
+  assert.match(script, /Capability matrix/);
+  assert.match(script, /function loadWorkspaceVariables/);
   assert.match(script, /function saveRepositorySetting/);
   assert.match(script, /function saveRepositoryWorkflowDirectory/);
   assert.match(script, /repository\.repositoryUrl/);
@@ -178,11 +190,21 @@ test("browser script references existing unique controls", async () => {
   assert.doesNotMatch(script, /secret\.value/);
 });
 
-test("run source links keep their label and external icon together", async () => {
-  const styles = await readFile(new URL("../public/styles.css", import.meta.url), "utf8");
+test("run details keep source links intact and defer technical metadata", async () => {
+  const [html, styles, script] = await Promise.all([
+    readFile(new URL("../public/index.html", import.meta.url), "utf8"),
+    readFile(new URL("../public/styles.css", import.meta.url), "utf8"),
+    readFile(new URL("../public/app.js", import.meta.url), "utf8"),
+  ]);
 
   assert.match(styles, /\.run-source-link \{[^}]*display: inline-flex;/);
-  assert.match(styles, /\.run-source-workflow \{[^}]*border-left:/);
+  assert.match(styles, /\.overview-run-workflow \{[^}]*align-items: baseline;/);
+  assert.match(html, /class="run-technical-details"/);
+  assert.match(html, /id="run-event-section"/);
+  assert.doesNotMatch(html, /Admin only|Authenticated and normalized after GitHub signature verification/);
+  assert.match(script, /detail\.webhookEvent/);
+  assert.doesNotMatch(html, /id="run-summary"/);
+  assert.match(styles, /\.run-log-view\.is-empty \{[^}]*background: var\(--bg\)/);
 });
 
 test("login uses a compact centered card", async () => {

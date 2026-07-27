@@ -10,7 +10,7 @@
     activeOrganization: null,
     organizationRequestId: 0,
     repositoryRequestId: 0,
-    approvalFilter: "all",
+    approvalFilter: "pending",
     activeApprovalId: null,
     selectedRepositories: new Map(),
     activeRunId: null,
@@ -19,8 +19,8 @@
     repositorySettingsLoading: false,
     repositorySection: "overview",
     repositoryRunsRefreshing: false,
-    organizationSettings: null,
-    organizationSettingsLoading: false,
+    workspaceSettings: null,
+    workspaceSettingsLoading: false,
     secretInventory: null,
     secretInventoryLoading: false,
     identity: null,
@@ -114,9 +114,9 @@
       : `<strong class="run-source-primary">${label}</strong>`;
     const meta = runTriggerMeta(run);
     const workflow = source.workflowPath
-      ? `<div class="run-source-workflow"><span>Workflow file</span><code title="${escapeHtml(source.workflowPath)}">${escapeHtml(source.workflowPath)}</code></div>`
+      ? `<code class="run-source-workflow" title="${escapeHtml(source.workflowPath)}">${escapeHtml(source.workflowPath)}</code>`
       : "";
-    return `<div class="run-source-icon" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="6" cy="6" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><path d="M6 8v8m2-8h4a6 6 0 0 1 6 6v2"/></svg></div><div class="run-source-content"><span class="run-source-eyebrow">Triggered by</span>${title}${meta.length ? `<div class="run-source-meta">${meta.map((value) => `<span>${escapeHtml(value)}</span>`).join("")}</div>` : ""}</div>${workflow}`;
+    return `<div class="run-source-content"><span class="run-source-eyebrow">Triggered by</span>${title}${meta.length ? `<div class="run-source-meta">${meta.map((value) => `<span>${escapeHtml(value)}</span>`).join("")}</div>` : ""}</div>${workflow}`;
   }
 
   function runActionsMarkup(run) {
@@ -170,10 +170,110 @@
     byId("user-name").textContent = session.principalName;
     byId("menu-user-name").textContent = session.principalName;
     byId("menu-tenant-name").textContent = session.tenantName;
-    byId("organization-page-title").textContent = session.tenantName;
     byId("user-initials").textContent = initials(session.principalName);
     byId("user-initials").hidden = false;
     applyCapabilities();
+  }
+
+  function renderOverview() {
+    const repositories = state.data.repositories || [];
+    const runs = state.data.runs || [];
+    const approvals = state.data.approvals || [];
+    const capabilities = state.data.capabilities || {};
+    const pending = approvals.filter((approval) => approval.status === "pending");
+    const activeRuns = runs.filter((run) => tone(run.status) === "running");
+    const runners = state.data.runners?.items || [];
+    const onlineRunners = runners.filter((runner) => runner.status === "online");
+    const readyRepositories = repositories.filter((repository) => tone(repository.state) === "success");
+    const primaryAction = byId("overview-primary-action");
+
+    if (capabilities.approvals && pending.length) {
+      primaryAction.textContent = pending.length === 1 ? "Review 1 approval" : `Review ${pending.length} approvals`;
+      primaryAction.dataset.overviewAction = "approvals";
+    } else if (capabilities.runs && activeRuns.length) {
+      primaryAction.textContent = activeRuns.length === 1 ? "View active run" : `View ${activeRuns.length} active runs`;
+      primaryAction.dataset.overviewAction = "runs";
+    } else if (!repositories.length) {
+      primaryAction.textContent = "Add repositories";
+      primaryAction.dataset.overviewAction = "add-repositories";
+    } else {
+      primaryAction.textContent = "View repositories";
+      primaryAction.dataset.overviewAction = "repositories";
+    }
+
+    const attentionList = byId("overview-attention-list");
+    byId("view-all-approvals").hidden = !capabilities.approvals;
+    if (!capabilities.approvals) {
+      byId("overview-attention-copy").textContent = "Approval visibility is not available for this role.";
+      attentionList.innerHTML = `<div class="overview-empty"><strong>Policy decisions are permission-gated</strong><p>Runtrue shows approval subjects only to authorized operators.</p></div>`;
+    } else if (!pending.length) {
+      byId("overview-attention-copy").textContent = "New or privileged workflow material remains blocked whenever policy requires review.";
+      attentionList.innerHTML = `<div class="overview-empty success"><span class="overview-empty-mark" aria-hidden="true">✓</span><div><strong>No decisions waiting</strong><p>The current approval queue is clear.</p></div></div>`;
+    } else {
+      const waitingExecutions = pending.reduce((total, approval) => total + Number(approval.waitingExecutions || 0), 0);
+      byId("overview-attention-copy").textContent = `${waitingExecutions} execution${waitingExecutions === 1 ? "" : "s"} ${waitingExecutions === 1 ? "remains" : "remain"} blocked pending exact policy decisions.`;
+      attentionList.innerHTML = pending.slice(0, 3).map((approval) => {
+        const trigger = approval.source?.pullRequest
+          ? `Pull request #${approval.source.pullRequest}`
+          : titleCase(approval.source?.event || "Execution request");
+        return `<article class="overview-approval-item">
+          <div class="overview-approval-context"><span class="state-badge warning">Pending</span><span>${escapeHtml(approval.repository || "Repository")}</span></div>
+          <div class="overview-approval-copy"><h3>${escapeHtml(approval.workflow?.name || approvalTitle(approval))}</h3><p>${escapeHtml(approvalTitle(approval))} · ${escapeHtml(trigger)}</p><small class="mono">Subject ${escapeHtml(compactId(approval.subjectDigest, 12))}</small></div>
+          <div class="overview-approval-risk"><span>Risk</span><strong>${escapeHtml(approval.riskScore ?? "—")}</strong></div>
+          <button class="btn btn-secondary btn-inline btn-compact" type="button" data-open-approval="${escapeHtml(approval.id)}">Review exact plan</button>
+        </article>`;
+      }).join("");
+    }
+
+    const posture = [
+      {
+        label: "GitHub ingress",
+        value: titleCase(state.data.github?.overall || "Unavailable"),
+        detail: state.data.github?.metadata?.providerHost || "Provider not configured",
+        state: state.data.github?.overall || "missing",
+      },
+      {
+        label: "Repository scope",
+        value: `${readyRepositories.length} of ${repositories.length} ready`,
+        detail: repositories.length ? "Connected execution repositories" : "No repositories connected",
+        state: repositories.length && readyRepositories.length === repositories.length ? "ready" : "warning",
+      },
+    ];
+    if (capabilities.runners) {
+      posture.push({
+        label: "Runner fleet",
+        value: `${onlineRunners.length} of ${runners.length} online`,
+        detail: `${runners.reduce((total, runner) => total + Number(runner.activeJobs || 0), 0)} active jobs`,
+        state: runners.length && onlineRunners.length ? "online" : "warning",
+      });
+    }
+    if (capabilities.audit) {
+      const auditEvents = state.data.audit || [];
+      posture.push({
+        label: "Audit evidence",
+        value: `${auditEvents.length} events loaded`,
+        detail: "Tenant-scoped durable history",
+        state: auditEvents.length ? "ready" : "neutral",
+      });
+    }
+    byId("overview-posture-list").innerHTML = posture.map((item) => `<div><dt><span class="posture-mark ${tone(item.state)}" aria-hidden="true"></span>${escapeHtml(item.label)}</dt><dd><strong>${escapeHtml(item.value)}</strong><small>${escapeHtml(item.detail)}</small></dd></div>`).join("");
+
+    const runList = byId("overview-run-list");
+    if (!runs.length) {
+      runList.innerHTML = `<div class="overview-empty"><strong>No workflow runs yet</strong><p>Runs appear after a connected repository sends a supported event.</p></div>`;
+    } else {
+      const orderedRuns = [...runs].sort((left, right) => {
+        const activeDifference = Number(tone(right.status) === "running") - Number(tone(left.status) === "running");
+        return activeDifference || new Date(right.createdAt || 0) - new Date(left.createdAt || 0);
+      });
+      runList.innerHTML = orderedRuns.slice(0, 5).map((run) => `<article class="overview-run-item">
+        <div class="overview-run-workflow"><span class="state-badge ${tone(run.status)}">${escapeHtml(titleCase(run.status))}</span><div><strong>${escapeHtml(run.source?.workflowName || "Workflow")}</strong><small class="mono">${escapeHtml(compactId(run.id))}</small></div></div>
+        <div class="overview-run-repository"><span>Repository</span><strong>${escapeHtml(run.repository)}</strong></div>
+        <div class="overview-run-trigger"><span>Source</span>${runTriggerMarkup(run)}</div>
+        <time datetime="${escapeHtml(run.startedAt || run.createdAt)}">${escapeHtml(formatDate(run.startedAt || run.createdAt))}</time>
+        <button class="text-button" type="button" data-open-run="${escapeHtml(run.id)}">Details <span aria-hidden="true">→</span></button>
+      </article>`).join("");
+    }
   }
 
   function renderRepositories() {
@@ -184,6 +284,9 @@
       return matchesSearch && matchesSource;
     });
     byId("sidebar-repo-count").textContent = state.data.repositories.length;
+    byId("summary-repo-count").textContent = state.data.repositories.length;
+    byId("summary-run-count").textContent = (state.data.runs || []).filter((run) => tone(run.status) === "running").length;
+    byId("summary-approval-count").textContent = (state.data.approvals || []).filter((approval) => approval.status === "pending").length;
     byId("visible-count").textContent = repositories.length;
     byId("total-count").textContent = `${state.data.repositories.length} total`;
 
@@ -196,7 +299,7 @@
     }
     const rows = repositories.map((repository) => {
       const pending = pendingApprovalsForRepository(repository.id).length;
-      return `<tr><td><button class="repo-link" type="button" data-open-repository="${escapeHtml(repository.id)}"><span class="repo-glyph" aria-hidden="true">R</span><span><strong>${escapeHtml(repository.organization)}/${escapeHtml(repository.name)}</strong><small>${escapeHtml(repository.visibility)} · ${escapeHtml(repository.defaultBranch)}</small></span></button></td><td>${escapeHtml(repository.source)}</td><td>${pending ? `<span class="approval-count-badge">${escapeHtml(pending)} pending</span>` : `<span class="muted-cell">None</span>`}</td><td><span class="state-badge ${tone(repository.state)}">${escapeHtml(repository.state)}</span></td></tr>`;
+      return `<tr><td><button class="repo-link" type="button" data-open-repository="${escapeHtml(repository.id)}"><span class="repo-glyph" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 3v12m8-6v12M4 7h8a4 4 0 0 1 4 4v2M8 17H6a2 2 0 1 0 2 2v-2Zm8-10h2a2 2 0 1 0-2-2v2Z"/></svg></span><span><strong>${escapeHtml(repository.organization)}/${escapeHtml(repository.name)}</strong><small>${escapeHtml(repository.visibility)} · ${escapeHtml(repository.defaultBranch)}</small></span></button></td><td>${escapeHtml(repository.source)}</td><td>${pending ? `<span class="approval-count-badge">${escapeHtml(pending)} pending</span>` : `<span class="muted-cell">None</span>`}</td><td><span class="state-badge ${tone(repository.state)}">${escapeHtml(repository.state)}</span></td></tr>`;
     }).join("");
     byId("catalog-content").innerHTML = `<div class="table-wrap"><table class="repo-table"><thead><tr><th>Repository</th><th>Source</th><th>Approvals</th><th>State</th></tr></thead><tbody>${rows}</tbody></table></div>`;
   }
@@ -218,6 +321,7 @@
       return matchesSearch && (status === "all" || String(run.status) === status);
     });
     byId("sidebar-run-count").textContent = runs.length;
+    byId("summary-run-count").textContent = runs.filter((run) => tone(run.status) === "running").length;
     byId("run-visible-count").textContent = visible.length;
     byId("run-total-count").textContent = `${runs.length} total`;
     const tbody = byId("runs-body");
@@ -236,8 +340,10 @@
     const approvals = state.data.approvals || [];
     const visible = approvals.filter((approval) => state.approvalFilter === "all" || (state.approvalFilter === "pending" ? approval.status === "pending" : approval.status !== "pending"));
     const pending = approvals.filter((approval) => approval.status === "pending").length;
+    const resolved = approvals.length - pending;
     byId("sidebar-approval-count").textContent = pending;
-    byId("approval-count-copy").textContent = `${pending} pending · ${approvals.length} total`;
+    byId("summary-approval-count").textContent = pending;
+    byId("approval-count-copy").textContent = `${pending} awaiting decision · ${resolved} resolved`;
     byId("approval-list").innerHTML = visible.map(approvalRow).join("");
     byId("approvals-empty").hidden = visible.length > 0;
   }
@@ -253,8 +359,11 @@
       : approval.source?.pullRequest ? `Pull request #${approval.source.pullRequest}` : titleCase(approval.source?.event || "Execution request");
     const remaining = Number(approval.remainingApprovals ?? approval.requiredApprovals ?? 0);
     const waiting = Number(approval.waitingExecutions || 0);
-    const scope = approval.kind === "privileged-execution" && approval.oneShot === false ? "Reusable capability grant" : titleCase(approval.kind);
-    return `<article class="approval-row"><div class="approval-main"><div class="approval-row-heading"><span class="state-badge ${tone(approval.status)}">${escapeHtml(titleCase(approval.status))}</span><span class="approval-repository">${escapeHtml(approval.repository || "Repository")}</span></div><h3>${escapeHtml(approval.workflow?.name || titleCase(approval.kind))}</h3><p>${escapeHtml(scope)} · ${escapeHtml(trigger)}</p><ul class="approval-signals"><li>${escapeHtml(remaining)} approval${remaining === 1 ? "" : "s"} needed</li>${waiting ? `<li>${escapeHtml(waiting)} execution${waiting === 1 ? "" : "s"} waiting</li>` : ""}<li>${escapeHtml(approval.jobs?.length || 0)} job${approval.jobs?.length === 1 ? "" : "s"}</li><li>Expires ${escapeHtml(formatDate(approval.expiresAt))}</li></ul></div><div class="risk-score ${approval.riskScore >= 70 ? "high" : ""}"><span>Risk</span><strong>${escapeHtml(approval.riskScore)}</strong></div><button class="btn btn-secondary btn-inline" type="button" data-open-approval="${escapeHtml(approval.id)}">Review</button></article>`;
+    const requestKind = approval.kind === "privileged-execution"
+      ? approval.oneShot === false ? "Workflow access" : "Privileged execution"
+      : "Workflow change";
+    const waitingCopy = waiting ? `${waiting} execution${waiting === 1 ? "" : "s"} waiting` : `${remaining} approval${remaining === 1 ? "" : "s"} remaining`;
+    return `<article class="approval-row"><div class="approval-main"><div class="approval-row-heading"><span class="state-badge ${tone(approval.status)}">${escapeHtml(titleCase(approval.status))}</span><span class="approval-repository">${escapeHtml(approval.repository || "Repository")}</span></div><h3>${escapeHtml(approval.workflow?.name || titleCase(approval.kind))}</h3><p>${escapeHtml(requestKind)} · ${escapeHtml(trigger)}</p><div class="approval-signals"><span>${escapeHtml(waitingCopy)}</span><span>Expires ${escapeHtml(formatDate(approval.expiresAt))}</span></div></div><button class="btn btn-secondary btn-inline" type="button" data-open-approval="${escapeHtml(approval.id)}">Review request</button></article>`;
   }
 
   function renderGitHub() {
@@ -550,18 +659,37 @@
       if (active) button.setAttribute("aria-current", "page"); else button.removeAttribute("aria-current");
     });
     if (["secrets", "variables", "settings"].includes(section)) loadRepositorySettings();
+    if (state.activeRepository) byId("topbar-view-name").textContent = `${state.activeRepository.key} / ${titleCase(section)}`;
     if (updateHash && state.activeRepository) updateRoute(repositoryRoute());
   }
 
   function renderRepositorySettings() {
     const settings = state.repositorySettings || { secrets: [], variables: [] };
-    const secrets = settings.secrets.filter((secret) => secret.status !== "tombstoned");
-    byId("repository-secrets-body").innerHTML = secrets.map((secret) => `<tr><td><strong class="mono setting-name">${escapeHtml(secret.name)}</strong><small>${escapeHtml(titleCase(secret.secret_type || "opaque"))} · ${escapeHtml(secret.provider || "built-in")}</small></td><td><span class="state-badge ${tone(secret.status)}">${escapeHtml(titleCase(secret.status))}</span></td><td class="setting-version">${escapeHtml(secret.current_version ?? "External")}</td><td class="setting-updated">${escapeHtml(formatDate(secret.updated_unix_ms))}</td><td><div class="setting-actions"><button class="setting-action" type="button" data-setting-scope="repository" data-edit-secret="${escapeHtml(secret.name)}">Update</button><button class="setting-action danger-text" type="button" data-setting-scope="repository" data-delete-setting="secret" data-setting-name="${escapeHtml(secret.name)}">Delete</button></div></td></tr>`).join("");
+    const secrets = (settings.effective_secrets || settings.secrets).filter((secret) => secret.status !== "tombstoned");
+    byId("repository-secrets-body").innerHTML = secrets.map((secret) => {
+      const ambiguous = secret.resolution_status === "ambiguous";
+      const sourceKind = secret.source_kind || "repository";
+      const sourceName = secret.source_name || state.activeRepository?.key || "Repository";
+      const source = `<strong class="setting-source-name">${escapeHtml(sourceName)}</strong><small>${escapeHtml(secretScopeKindLabel(sourceKind))}</small>`;
+      const actions = !secret.inherited && !ambiguous
+        ? `<div class="setting-actions"><button class="setting-action" type="button" data-setting-scope="repository" data-edit-secret="${escapeHtml(secret.name)}">Update</button><button class="setting-action danger-text" type="button" data-setting-scope="repository" data-delete-setting="secret" data-setting-name="${escapeHtml(secret.name)}">Delete</button></div>`
+        : `<span class="inherited-note">${ambiguous ? "Fail closed" : "Inherited"}</span>`;
+      return `<tr class="${ambiguous ? "setting-row-blocked" : ""}"><td><strong class="mono setting-name">${escapeHtml(secret.name)}</strong><small>${ambiguous ? "Multiple matching projects" : `${escapeHtml(titleCase(secret.secret_type || "opaque"))} · ${escapeHtml(secret.provider || "built-in")}`}</small></td><td>${source}</td><td><span class="state-badge ${tone(secret.status)}">${escapeHtml(titleCase(secret.status))}</span></td><td class="setting-version">${escapeHtml(ambiguous ? "—" : secret.current_version ?? "External")}</td><td class="setting-updated">${escapeHtml(ambiguous ? "Resolution blocked" : formatDate(secret.updated_unix_ms))}</td><td>${actions}</td></tr>`;
+    }).join("");
     byId("repository-secrets-empty").hidden = secrets.length > 0;
     byId("repository-secrets-body").closest("table").hidden = secrets.length === 0;
-    byId("repository-variables-body").innerHTML = settings.variables.map((variable) => { const value = typeof variable.value === "string" ? variable.value : JSON.stringify(variable.value); return `<tr><td><strong class="mono setting-name">${escapeHtml(variable.name)}</strong></td><td class="setting-value"><code title="${escapeHtml(value)}">${escapeHtml(value)}</code></td><td class="setting-version">${escapeHtml(variable.version)}</td><td class="setting-updated">${escapeHtml(formatDate(variable.updated_unix_ms))}</td><td><div class="setting-actions"><button class="setting-action" type="button" data-setting-scope="repository" data-edit-variable="${escapeHtml(variable.name)}">Edit</button><button class="setting-action danger-text" type="button" data-setting-scope="repository" data-delete-setting="variable" data-setting-name="${escapeHtml(variable.name)}">Delete</button></div></td></tr>`; }).join("");
-    byId("repository-variables-empty").hidden = settings.variables.length > 0;
-    byId("repository-variables-body").closest("table").hidden = settings.variables.length === 0;
+    const variables = settings.effective_variables || settings.variables;
+    byId("repository-variables-body").innerHTML = variables.map((variable) => {
+      const value = typeof variable.value === "string" ? variable.value : JSON.stringify(variable.value);
+      const sourceKind = variable.source_kind || "repository";
+      const sourceName = variable.source_name || state.activeRepository?.key || "Repository";
+      const actions = variable.inherited
+        ? `<span class="inherited-note">Inherited</span>`
+        : `<div class="setting-actions"><button class="setting-action" type="button" data-setting-scope="repository" data-edit-variable="${escapeHtml(variable.name)}">Edit</button><button class="setting-action danger-text" type="button" data-setting-scope="repository" data-delete-setting="variable" data-setting-name="${escapeHtml(variable.name)}">Delete</button></div>`;
+      return `<tr><td><strong class="mono setting-name">${escapeHtml(variable.name)}</strong></td><td class="setting-value"><code title="${escapeHtml(value)}">${escapeHtml(value)}</code></td><td><strong class="setting-source-name">${escapeHtml(sourceName)}</strong><small>${escapeHtml(secretScopeKindLabel(sourceKind))}</small></td><td class="setting-version">${escapeHtml(variable.version)}</td><td class="setting-updated">${escapeHtml(formatDate(variable.updated_unix_ms))}</td><td>${actions}</td></tr>`;
+    }).join("");
+    byId("repository-variables-empty").hidden = variables.length > 0;
+    byId("repository-variables-body").closest("table").hidden = variables.length === 0;
     byId("repository-workflow-directory").value = settings.workflow_directory || "";
     byId("repository-workflow-directory-help").textContent = state.repositorySettings
       ? settings.workflow_directory_inherited
@@ -571,27 +699,23 @@
     byId("save-repository-workflow-directory").disabled = !state.repositorySettings;
   }
 
-  function renderOrganizationSettings() {
-    const settings = state.organizationSettings || { secrets: [], variables: [] };
-    const secrets = settings.secrets.filter((secret) => secret.status !== "tombstoned");
-    byId("organization-secrets-body").innerHTML = secrets.map((secret) => `<tr><td><strong class="mono setting-name">${escapeHtml(secret.name)}</strong><small>${escapeHtml(titleCase(secret.secret_type || "opaque"))} · ${escapeHtml(secret.provider || "built-in")}</small></td><td><span class="state-badge ${tone(secret.status)}">${escapeHtml(titleCase(secret.status))}</span></td><td class="setting-version">${escapeHtml(secret.current_version ?? "External")}</td><td class="setting-updated">${escapeHtml(formatDate(secret.updated_unix_ms))}</td><td><div class="setting-actions"><button class="setting-action" type="button" data-setting-scope="organization" data-edit-secret="${escapeHtml(secret.name)}">Update</button><button class="setting-action danger-text" type="button" data-setting-scope="organization" data-delete-setting="secret" data-setting-name="${escapeHtml(secret.name)}">Delete</button></div></td></tr>`).join("");
-    byId("organization-secrets-empty").hidden = secrets.length > 0;
-    byId("organization-secrets-body").closest("table").hidden = secrets.length === 0;
-    byId("organization-variables-body").innerHTML = settings.variables.map((variable) => { const value = typeof variable.value === "string" ? variable.value : JSON.stringify(variable.value); return `<tr><td><strong class="mono setting-name">${escapeHtml(variable.name)}</strong></td><td class="setting-value"><code title="${escapeHtml(value)}">${escapeHtml(value)}</code></td><td class="setting-version">${escapeHtml(variable.version)}</td><td class="setting-updated">${escapeHtml(formatDate(variable.updated_unix_ms))}</td><td><div class="setting-actions"><button class="setting-action" type="button" data-setting-scope="organization" data-edit-variable="${escapeHtml(variable.name)}">Edit</button><button class="setting-action danger-text" type="button" data-setting-scope="organization" data-delete-setting="variable" data-setting-name="${escapeHtml(variable.name)}">Delete</button></div></td></tr>`; }).join("");
-    byId("organization-variables-empty").hidden = settings.variables.length > 0;
-    byId("organization-variables-body").closest("table").hidden = settings.variables.length === 0;
+  function renderWorkspaceVariables() {
+    const settings = state.workspaceSettings || { variables: [] };
+    byId("workspace-variables-body").innerHTML = settings.variables.map((variable) => { const value = typeof variable.value === "string" ? variable.value : JSON.stringify(variable.value); return `<tr><td><strong class="mono setting-name">${escapeHtml(variable.name)}</strong></td><td class="setting-value"><code title="${escapeHtml(value)}">${escapeHtml(value)}</code></td><td class="setting-version">${escapeHtml(variable.version)}</td><td class="setting-updated">${escapeHtml(formatDate(variable.updated_unix_ms))}</td><td><div class="setting-actions"><button class="setting-action" type="button" data-setting-scope="organization" data-edit-variable="${escapeHtml(variable.name)}">Edit</button><button class="setting-action danger-text" type="button" data-setting-scope="organization" data-delete-setting="variable" data-setting-name="${escapeHtml(variable.name)}">Delete</button></div></td></tr>`; }).join("");
+    byId("workspace-variables-empty").hidden = settings.variables.length > 0;
+    byId("workspace-variables-body").closest("table").hidden = settings.variables.length === 0;
   }
 
-  async function loadOrganizationSettings(force = false) {
-    if (state.organizationSettingsLoading || (state.organizationSettings && !force)) return;
-    state.organizationSettingsLoading = true;
+  async function loadWorkspaceVariables(force = false) {
+    if (state.workspaceSettingsLoading || (state.workspaceSettings && !force)) return;
+    state.workspaceSettingsLoading = true;
     try {
       const response = await fetch("/api/v1/ui/organization/settings", { credentials: "same-origin", headers: { accept: "application/json" } });
-      if (!response.ok) throw new Error(response.status === 403 ? "You do not have access to these settings." : "Could not load organization settings.");
-      state.organizationSettings = await response.json();
-      renderOrganizationSettings();
-    } catch (error) { showToast(error.message || "Could not load organization settings."); }
-    finally { state.organizationSettingsLoading = false; }
+      if (!response.ok) throw new Error(response.status === 403 ? "You do not have access to these settings." : "Could not load workspace variables.");
+      state.workspaceSettings = await response.json();
+      renderWorkspaceVariables();
+    } catch (error) { showToast(error.message || "Could not load workspace variables."); }
+    finally { state.workspaceSettingsLoading = false; }
   }
 
   function secretScope(scope = "") {
@@ -614,6 +738,15 @@
     return scope.id;
   }
 
+  function secretScopeKindLabel(kind) {
+    return {
+      workspace: "Workspace",
+      project: "Project",
+      scm_account: "GitHub organization",
+      repository: "Repository",
+    }[kind] || titleCase(kind);
+  }
+
   function renderSecretInventory() {
     const inventory = state.secretInventory || { secrets: [], projects: [], scm_accounts: [], repositories: [] };
     const query = byId("secret-search").value.trim().toLowerCase();
@@ -627,7 +760,7 @@
     byId("secret-inventory-body").innerHTML = rows.map((secret) => {
       const scopeLabel = secretScopeLabel(secret.parsedScope);
       const actions = secret.status === "active" ? `<div class="setting-actions"><button class="setting-action" type="button" data-edit-scoped-secret="${escapeHtml(secret.name)}" data-secret-scope-kind="${escapeHtml(secret.parsedScope.kind)}" data-secret-scope-id="${escapeHtml(secret.parsedScope.id)}">Rotate</button><button class="setting-action danger-text" type="button" data-delete-scoped-secret="${escapeHtml(secret.name)}" data-secret-scope-kind="${escapeHtml(secret.parsedScope.kind)}" data-secret-scope-id="${escapeHtml(secret.parsedScope.id)}">Delete</button></div>` : "";
-      return `<tr><td><strong class="mono setting-name">${escapeHtml(secret.name)}</strong><small>${escapeHtml(titleCase(secret.secret_type || "opaque"))}</small></td><td><span class="scope-chip">${escapeHtml(titleCase(secret.parsedScope.kind))}</span><small>${escapeHtml(scopeLabel)}</small></td><td>${escapeHtml(secret.provider)}</td><td><span class="state-badge ${tone(secret.status)}">${escapeHtml(titleCase(secret.status))}</span></td><td>${escapeHtml(secret.current_version ?? "External")}</td><td>${escapeHtml(formatDate(secret.updated_unix_ms))}</td><td>${actions}</td></tr>`;
+      return `<tr><td><strong class="mono setting-name">${escapeHtml(secret.name)}</strong><small>${escapeHtml(titleCase(secret.secret_type || "opaque"))}<span class="secret-compact-meta"> · ${escapeHtml(secret.provider)} · v${escapeHtml(secret.current_version ?? "external")}</span></small></td><td><strong class="secret-scope-name">${escapeHtml(scopeLabel)}</strong><small>${escapeHtml(secretScopeKindLabel(secret.parsedScope.kind))}</small></td><td class="secret-provider">${escapeHtml(secret.provider)}</td><td><span class="state-badge ${tone(secret.status)}">${escapeHtml(titleCase(secret.status))}</span></td><td class="setting-version">${escapeHtml(secret.current_version ?? "External")}</td><td class="setting-updated">${escapeHtml(formatDate(secret.updated_unix_ms))}</td><td>${actions}</td></tr>`;
     }).join("");
     byId("secret-inventory-empty").hidden = rows.length > 0;
     byId("secret-inventory-body").closest("table").hidden = rows.length === 0;
@@ -804,21 +937,22 @@
     openSetting("repository", kind, name);
   }
 
-  function openOrganizationSetting(kind, name = "") {
-    openSetting("organization", kind, name);
+  function openWorkspaceVariable() {
+    openSetting("organization", "variable");
   }
 
   function openSetting(scope, kind, name = "") {
     const isSecret = kind === "secret";
     const existing = name !== "";
+    const scopeLabel = scope === "organization" ? "Workspace" : "Repository";
     state.settingScope = scope;
     state.settingKind = kind;
-    byId("repository-setting-kicker").textContent = `${titleCase(scope)} ${kind}`;
+    byId("repository-setting-kicker").textContent = `${scopeLabel} ${kind}`;
     byId("repository-setting-title").textContent = `${existing ? "Update" : "Add"} ${kind}`;
     byId("repository-setting-copy").textContent = scope === "organization" ? state.data.session.tenantName : state.activeRepository?.key || "";
     byId("repository-setting-name").value = name;
     byId("repository-setting-name").readOnly = existing;
-    const settings = scope === "organization" ? state.organizationSettings : state.repositorySettings;
+    const settings = scope === "organization" ? state.workspaceSettings : state.repositorySettings;
     const current = !isSecret && existing ? settings?.variables.find((item) => item.name === name)?.value : "";
     byId("repository-setting-value").value = typeof current === "string" ? current : "";
     byId("repository-setting-value-label").textContent = isSecret ? "Secret value" : "Value";
@@ -841,7 +975,7 @@
       const response = await fetch(`${base}/${plural}`, { method: "POST", body, credentials: "same-origin" });
       if (!response.ok) { const problem = await response.json().catch(() => null); throw new Error(problem?.detail || `Could not save ${state.settingKind}.`); }
       byId("repository-setting-dialog").close();
-      if (state.settingScope === "organization") { state.organizationSettings = null; await loadOrganizationSettings(true); }
+      if (state.settingScope === "organization") { state.workspaceSettings = null; await loadWorkspaceVariables(true); }
       else { state.repositorySettings = null; await loadRepositorySettings(true); }
       showToast(`${titleCase(state.settingKind)} saved.`);
     } catch (error) { showToast(error.message || "The setting could not be saved."); }
@@ -870,7 +1004,7 @@
       const response = await fetch(`${base}/${plural}/delete`, { method: "POST", body, credentials: "same-origin" });
       if (!response.ok) { const problem = await response.json().catch(() => null); throw new Error(problem?.detail || `Could not delete the ${kind}.`); }
       byId("delete-setting-dialog").close();
-      if (scope === "organization") { state.organizationSettings = null; await loadOrganizationSettings(true); }
+      if (scope === "organization") { state.workspaceSettings = null; await loadWorkspaceVariables(true); }
       else { state.repositorySettings = null; await loadRepositorySettings(true); }
       showToast(`${titleCase(kind)} deleted.`);
     } catch (error) { showToast(error.message || `The ${kind} could not be deleted.`); }
@@ -879,9 +1013,6 @@
 
   function showRecordDetails(kicker, title, copy, fields) {
     state.activeApprovalId = null;
-    byId("record-detail-dialog").classList.remove("approval-dialog");
-    byId("approve-workflow-approval").hidden = true;
-    byId("deny-workflow-approval").hidden = true;
     byId("record-detail-footer-copy").textContent = "Read-only.";
     byId("record-detail-kicker").textContent = kicker;
     byId("record-detail-title").textContent = title;
@@ -904,27 +1035,36 @@
     const selected = byId("run-log-filter").value;
     const visible = detail.logs.filter((frame) => selected === "all" || `${frame.jobId}:${frame.stepId}` === selected);
     const jobNames = new Map(detail.jobs.map((job) => [job.id, job.key]));
-    byId("run-log-view").innerHTML = visible.length ? visible.map((frame) => `<article class="run-log-entry ${frame.stream === "stderr" ? "is-stderr" : ""}"><div class="run-log-meta"><time datetime="${escapeHtml(frame.timestamp)}">${escapeHtml(formatLogTime(frame.timestamp))}</time><span>${escapeHtml(jobNames.get(frame.jobId) || compactId(frame.jobId))}</span><span>${escapeHtml(frame.stepId)}</span><span class="stream-label">${escapeHtml(frame.stream)}</span></div><pre>${escapeHtml(frame.payload)}</pre></article>`).join("") : `<div class="run-detail-empty"><strong>No logs</strong><p>${detail.logs.length ? "No logs match this filter." : "This run has no logs."}</p></div>`;
+    const logView = byId("run-log-view");
+    logView.classList.toggle("is-empty", !visible.length);
+    logView.innerHTML = visible.length ? visible.map((frame) => `<article class="run-log-entry ${frame.stream === "stderr" ? "is-stderr" : ""}"><div class="run-log-meta"><time datetime="${escapeHtml(frame.timestamp)}">${escapeHtml(formatLogTime(frame.timestamp))}</time><span>${escapeHtml(jobNames.get(frame.jobId) || compactId(frame.jobId))}</span><span>${escapeHtml(frame.stepId)}</span><span class="stream-label">${escapeHtml(frame.stream)}</span></div><pre>${escapeHtml(frame.payload)}</pre></article>`).join("") : `<div class="run-detail-empty"><strong>${detail.logs.length ? "No matching logs" : "No logs emitted"}</strong><p>${detail.logs.length ? "Choose another job or step." : "This run completed without producing log output."}</p></div>`;
   }
 
   function renderRunDetail(run, detail) {
     state.activeRunDetails = detail;
     const duration = formatDuration(run.startedAt, run.completedAt);
-    const source = run.source || {};
+    byId("run-header-outcome").innerHTML = `<span class="state-badge ${tone(run.status)}">${escapeHtml(titleCase(run.status))}</span><span>${escapeHtml(duration)}</span><time datetime="${escapeHtml(run.startedAt || run.createdAt || "")}">${escapeHtml(formatDate(run.startedAt || run.createdAt))}</time>`;
     byId("run-source-card").innerHTML = runSourceCardMarkup(run);
-    byId("run-summary").innerHTML = [
-      ["Status", `<span class="state-badge ${tone(run.status)}">${escapeHtml(titleCase(run.status))}</span>`],
-      ["Duration", escapeHtml(duration)],
-      ["Started", escapeHtml(formatDate(run.startedAt))],
-      ["Completed", escapeHtml(formatDate(run.completedAt))],
-    ].map(([label, value]) => `<div><span>${label}</span><strong>${value}</strong></div>`).join("");
-    byId("run-identifiers").innerHTML = `<div><dt>Workflow</dt><dd>${escapeHtml(source.workflowName || "Not recorded")}</dd></div><div><dt>Execution</dt><dd>${run.remote ? "Remote runner" : "Local"}${run.priority ? ` · Priority ${escapeHtml(run.priority)}` : ""}</dd></div><div><dt>Run ID</dt><dd class="mono">${escapeHtml(run.id)}</dd></div><div><dt>Capsule ID</dt><dd class="mono">${escapeHtml(run.planId)}</dd></div>${run.cancelReason ? `<div><dt>Cancel reason</dt><dd>${escapeHtml(run.cancelReason)}</dd></div>` : ""}`;
+    byId("run-identifiers").innerHTML = `<div><dt>Execution</dt><dd>${run.remote ? "Remote runner" : "Local"}${run.priority ? ` · Priority ${escapeHtml(run.priority)}` : ""}</dd></div><div><dt>Completed</dt><dd>${escapeHtml(formatDate(run.completedAt))}</dd></div><div><dt>Run ID</dt><dd class="mono">${escapeHtml(run.id)}</dd></div><div><dt>Capsule ID</dt><dd class="mono">${escapeHtml(run.planId)}</dd></div>${run.cancelReason ? `<div><dt>Cancel reason</dt><dd>${escapeHtml(run.cancelReason)}</dd></div>` : ""}`;
 
     byId("run-job-count").textContent = `${detail.jobs.length} ${detail.jobs.length === 1 ? "job" : "jobs"}`;
-    byId("run-job-list").innerHTML = detail.jobs.length ? detail.jobs.map((job, index) => {
+    byId("run-job-list").innerHTML = detail.jobs.length ? detail.jobs.map((job) => {
       const steps = job.steps || [];
-      return `<article class="run-job"><div class="job-index" aria-hidden="true">${index + 1}</div><div class="run-job-main"><header><div><h4>${escapeHtml(job.name || titleCase(job.key))}</h4><p class="mono" title="${escapeHtml(job.id)}">${escapeHtml(compactId(job.id, 10))} · Attempt ${escapeHtml(job.attempt)}</p></div><span class="state-badge ${tone(job.status)}">${escapeHtml(titleCase(job.status))}</span></header><p class="job-requirements">${escapeHtml(runRequirementSummary(job.requirements))}</p><div class="job-steps">${steps.length ? steps.map((step) => `<span title="${escapeHtml(step.id)}">${escapeHtml(step.name || step.id)}${step.finalizer ? " · finalizer" : ""}</span>`).join("") : "<span>No planned steps recorded</span>"}</div></div><div class="job-duration"><span>Duration</span><strong>${escapeHtml(formatDuration(job.createdAt, job.completedAt))}</strong></div></article>`;
+      const stepsMarkup = steps.length ? `<details class="run-job-steps"><summary>${steps.length} planned ${steps.length === 1 ? "step" : "steps"}</summary><div>${steps.map((step) => `<span title="${escapeHtml(step.id)}">${escapeHtml(step.name || step.id)}${step.finalizer ? " · finalizer" : ""}</span>`).join("")}</div></details>` : "";
+      return `<article class="run-job"><div class="run-job-main"><header><div><h4>${escapeHtml(job.name || titleCase(job.key))}</h4><p>${escapeHtml(runRequirementSummary(job.requirements))}</p></div></header>${stepsMarkup}<p class="run-job-technical mono" title="${escapeHtml(job.id)}">${escapeHtml(compactId(job.id, 12))} · Attempt ${escapeHtml(job.attempt)}</p></div><div class="run-job-outcome"><span class="state-badge ${tone(job.status)}">${escapeHtml(titleCase(job.status))}</span><span>${escapeHtml(formatDuration(job.createdAt, job.completedAt))}</span></div></article>`;
     }).join("") : `<div class="run-detail-empty"><strong>No jobs</strong></div>`;
+
+    const eventSection = byId("run-event-section");
+    const webhookEvent = detail.webhookEvent;
+    eventSection.hidden = !webhookEvent;
+    byId("run-event-disclosure").open = false;
+    byId("run-event-payload").textContent = "";
+    if (webhookEvent) {
+      byId("run-event-summary").textContent = `${titleCase(webhookEvent.provider)} · ${titleCase(webhookEvent.eventKind)}`;
+      byId("run-event-summary-copy").textContent = `Delivery ${compactId(webhookEvent.deliveryId, 12)}`;
+      byId("run-event-metadata").innerHTML = `<div><dt>Delivery ID</dt><dd class="mono">${escapeHtml(webhookEvent.deliveryId)}</dd></div><div><dt>Received</dt><dd>${escapeHtml(formatDate(webhookEvent.receivedAt))}</dd></div><div><dt>Raw body digest</dt><dd class="mono run-event-digest" title="${escapeHtml(webhookEvent.rawPayloadDigest)}">${escapeHtml(webhookEvent.rawPayloadDigest)}</dd></div><div><dt>Normalized digest</dt><dd class="mono run-event-digest" title="${escapeHtml(webhookEvent.normalizedDigest)}">${escapeHtml(webhookEvent.normalizedDigest)}</dd></div>`;
+      byId("run-event-payload").textContent = JSON.stringify(webhookEvent.payload, null, 2);
+    }
 
     const options = [];
     detail.logs.forEach((frame) => {
@@ -937,6 +1077,7 @@
     byId("run-log-filter").innerHTML = `<option value="all">All jobs and steps</option>${options.map((option) => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`).join("")}`;
     byId("run-log-filter-wrap").hidden = options.length < 2;
     byId("run-logs-copy").textContent = `${detail.logs.length} ${detail.logs.length === 1 ? "entry" : "entries"}`;
+    byId("run-log-safety").hidden = detail.logs.length === 0;
     byId("run-logs-truncated").hidden = !detail.logsTruncated;
     const retry = byId("retry-run");
     const retryQueued = state.retryingRuns.has(run.id);
@@ -956,6 +1097,10 @@
     state.activeRunDetails = null;
     byId("run-detail-title").textContent = run.source?.workflowName || `Run ${compactId(run.id).replace(/^run-/, "")}`;
     byId("run-detail-copy").textContent = `${run.repository} · ${runEventLabel(run)}`;
+    byId("run-header-outcome").innerHTML = `<span class="state-badge ${tone(run.status)}">${escapeHtml(titleCase(run.status))}</span>`;
+    byId("run-event-section").hidden = true;
+    byId("run-event-disclosure").open = false;
+    byId("run-event-payload").textContent = "";
     byId("run-detail-loading").hidden = false;
     byId("run-detail-error").hidden = true;
     byId("run-detail-content").hidden = true;
@@ -995,6 +1140,7 @@
       }
       state.retryingRuns.add(id);
       renderRuns();
+      renderOverview();
       if (state.activeRepository) renderRepositoryRuns((state.data.runs || []).filter((item) => item.repositoryId === state.activeRepository.id));
       if (state.activeRunId === id && state.activeRunDetails) renderRunDetail(run, state.activeRunDetails);
       showToast("Retry queued from the original GitHub event. A new run will appear shortly.");
@@ -1012,52 +1158,79 @@
   function openApproval(id) {
     const approval = (state.data.approvals || []).find((item) => item.id === id);
     if (!approval) return;
+    if (document.querySelector('[data-view="approvals"][hidden]')) switchView("approvals");
     const waitingPullRequests = approval.waitingPullRequests || [];
     const trigger = waitingPullRequests.length
       ? `Pull request${waitingPullRequests.length === 1 ? "" : "s"} ${waitingPullRequests.map((number) => `#${number}`).join(", ")}`
       : approval.source?.pullRequest
         ? `Pull request #${approval.source.pullRequest}`
         : `${titleCase(approval.source?.event || "Repository event")}${approval.source?.action ? ` · ${titleCase(approval.source.action)}` : ""}`;
-    const reasons = (approval.reasons || []).map((reason) => `<li><strong>${escapeHtml(approvalReasonTitle(reason))}</strong><span>${escapeHtml(approvalReasonDescription(reason))}</span></li>`).join("");
-    const permissions = approvalPermissionSummary(approval.permissions).map((permission) => `<li><div class="approval-access-copy"><span>${escapeHtml(permission.label)}</span>${(permission.details || []).map((detail) => `<small>${escapeHtml(detail)}</small>`).join("")}</div><strong class="${permission.elevated ? "danger-text" : ""}">${escapeHtml(permission.value)}</strong></li>`).join("");
-    const jobs = (approval.jobs || []).map((job) => `<li><span class="job-index" aria-hidden="true">${escapeHtml((approval.jobs || []).indexOf(job) + 1)}</span><div><strong>${escapeHtml(job.name || job.id)}</strong><small class="mono">${escapeHtml(job.id)}</small></div></li>`).join("");
+    const reasonLabels = (approval.reasons || []).map(approvalReasonTitle);
+    const permissionSummary = approvalPermissionSummary(approval.permissions);
+    const permissions = permissionSummary.map((permission) => `<div class="approval-capability-row"><div><strong>${escapeHtml(permission.label)}</strong></div><div>${permission.details?.length ? permission.details.map((detail) => `<small>${escapeHtml(detail)}</small>`).join("") : `<small>${escapeHtml(permission.scope || "Execution plan")}</small>`}</div><strong class="${permission.elevated ? "danger-text" : ""}">${escapeHtml(permission.value)}</strong></div>`).join("");
+    const jobs = (approval.jobs || []).map((job) => job.name || job.id).filter(Boolean);
     const decisions = (approval.decisions || []).map((decision) => `<li><div><strong>${escapeHtml(titleCase(decision.decision))} by ${escapeHtml(decision.actor)}</strong><small>${escapeHtml(formatDate(decision.decidedAt))}</small></div><span>${escapeHtml(decision.reason)}</span></li>`).join("");
     const reusableGrant = approval.kind === "privileged-execution" && approval.oneShot === false;
-    showRecordDetails("Approval request", approvalTitle(approval), `${approval.repository} · ${trigger}`, []);
-    byId("record-detail-dialog").classList.add("approval-dialog");
-    byId("record-detail-grid").innerHTML = `<div class="approval-review">
-      <section class="approval-review-lead"><div><span class="state-badge ${tone(approval.status)}">${escapeHtml(titleCase(approval.status))}</span><h3>${escapeHtml(approval.workflow?.name || "Workflow execution")}</h3><p>Review the exact execution plan and requested access before deciding.</p></div><div class="risk-score ${approval.riskScore >= 70 ? "high" : ""}"><span>Risk</span><strong>${escapeHtml(approval.riskScore)}</strong></div></section>
-      <section class="approval-review-section"><h3>What will run</h3><div class="approval-context-grid"><div><span>Repository</span><strong>${escapeHtml(approval.repository)}</strong></div><div><span>Workflow</span><strong>${escapeHtml(approval.workflow?.name || "Not recorded")}</strong><small class="mono">${escapeHtml(approval.workflow?.path || "")}</small></div><div><span>Trigger</span><strong>${escapeHtml(trigger)}</strong></div><div><span>Source commit</span><strong class="mono">${escapeHtml(compactId(approval.source?.commit, 12))}</strong><small>${escapeHtml(approval.source?.ref || "Repository source")}</small></div></div></section>
-      <section class="approval-review-section"><h3>Why approval is required</h3><p>${escapeHtml(approvalKindDescription(approval.kind, approval.oneShot))}</p><ul class="approval-reason-list">${reasons || "<li><strong>Policy review</strong><span>The active policy requires a human decision for this capability set.</span></li>"}</ul></section>
-      <section class="approval-review-section"><h3>Access requested</h3><ul class="approval-access-list">${permissions || "<li><span>Additional access</span><strong>None</strong></li>"}</ul></section>
-      <section class="approval-review-section"><h3>Jobs (${escapeHtml(approval.jobs?.length || 0)})</h3><ul class="approval-job-list">${jobs || "<li><div><strong>No jobs recorded</strong></div></li>"}</ul></section>
-      ${decisions ? `<section class="approval-review-section"><h3>Decisions</h3><ul class="approval-decision-list">${decisions}</ul></section>` : ""}
+    const decisionScope = approvalKindDescription(approval.kind, approval.oneShot);
+    const workflowName = approval.workflow?.name || "Workflow execution";
+    const workflowPath = approval.workflow?.path || "Not recorded";
+    const sourceCommit = approval.source?.commit ? compactId(approval.source.commit, 12) : "Not recorded";
+    const reasonCopy = reasonLabels.length ? reasonLabels.join(" · ") : "Policy review";
+    state.activeApprovalId = approval.id;
+    byId("approval-queue-view").hidden = true;
+    byId("approval-review-view").hidden = false;
+    byId("approval-review-kicker").textContent = approvalTitle(approval);
+    byId("approval-review-title").textContent = workflowName;
+    byId("approval-review-copy").textContent = `${approval.repository} · ${trigger}`;
+    byId("approval-workbench-state").innerHTML = `<span class="state-badge ${tone(approval.status)}">${escapeHtml(titleCase(approval.status))}</span><span>Expires ${escapeHtml(formatDate(approval.expiresAt))}</span>`;
+    byId("approval-review-content").innerHTML = `
+      <section class="approval-policy-summary"><p>Policy finding</p><h2>${escapeHtml(reasonCopy)}</h2><span>${escapeHtml(decisionScope)}</span></section>
+      <section class="approval-capability-section"><header><div><h2>Capability matrix</h2><p>The exact access available to matching jobs.</p></div><span>${escapeHtml(permissionSummary.length)} capabilities</span></header><div class="approval-capability-matrix"><div class="approval-capability-head"><span>Capability</span><span>Scope</span><span>Access</span></div>${permissions || '<div class="approval-capability-empty">No elevated access requested.</div>'}</div></section>
+      <section class="approval-evidence"><div><p>Source evidence</p><dl><div><dt>Workflow</dt><dd>${escapeHtml(workflowPath)}</dd></div><div><dt>Commit</dt><dd><span class="mono">${escapeHtml(sourceCommit)}</span>${approval.source?.ref ? `<small>${escapeHtml(shortRef(approval.source.ref))}</small>` : ""}</dd></div><div><dt>Jobs</dt><dd>${escapeHtml(jobs.length ? jobs.join(", ") : "Not recorded")}</dd></div></dl></div></section>
+      ${decisions ? `<section class="approval-decisions"><h2>Decision history</h2><ul class="approval-decision-list">${decisions}</ul></section>` : ""}
       <details class="approval-exact-plan"><summary>${reusableGrant ? "Capability identity" : "Exact-plan identity"}</summary><dl><div><dt>Capsule</dt><dd class="mono">${escapeHtml(approval.capsuleId)}</dd></div><div><dt>${reusableGrant ? "Capability digest" : "Subject digest"}</dt><dd class="mono">${escapeHtml(approval.subjectDigest)}</dd></div><div><dt>Rule</dt><dd class="mono">${escapeHtml(approval.ruleId)}</dd></div><div><dt>Requested</dt><dd>${escapeHtml(formatDate(approval.createdAt))}</dd></div><div><dt>${approval.status === "approved" && reusableGrant ? "Valid until" : "Approval deadline"}</dt><dd>${escapeHtml(formatDate(approval.expiresAt))}</dd></div></dl><p>${reusableGrant ? "This grant authorizes future matching executions for this repository until it expires. A workflow, action, access, or policy change creates a new approval request." : "This approval authorizes one execution of this exact plan. If it is not approved before the deadline, the request expires and the run will not start."}</p></details>
-    </div>`;
+    `;
     if (approval.status === "pending" && approval.canDecide) {
-      state.activeApprovalId = approval.id;
       byId("approve-workflow-approval").hidden = false;
       byId("deny-workflow-approval").hidden = false;
-      byId("record-detail-footer-copy").textContent = reusableGrant ? "Approval grants this unchanged workflow capability set until it expires." : "Approval authorizes this exact execution once and must be decided before the deadline.";
+      byId("deny-workflow-approval").textContent = "Reject request";
+      byId("approve-workflow-approval").textContent = reusableGrant ? "Approve capabilities" : approval.kind === "privileged-execution" ? "Approve execution" : "Approve workflow";
+      byId("approval-decision-title").textContent = reusableGrant ? "Future matching runs can use this access." : "One reviewed execution can proceed.";
+      byId("approval-decision-copy").textContent = reusableGrant ? `Ends ${formatDate(approval.expiresAt)}. Changes require a new approval. ${Number(approval.waitingExecutions || 0)} waiting now.` : "Any plan or source change requires another approval.";
     } else {
-      byId("record-detail-footer-copy").textContent = approval.status === "pending" ? "You do not have permission to decide this request." : `This request is ${titleCase(approval.status).toLowerCase()}.`;
+      byId("approve-workflow-approval").hidden = true;
+      byId("deny-workflow-approval").hidden = true;
+      byId("approval-decision-title").textContent = approval.status === "pending" ? "Decision unavailable" : `Request ${titleCase(approval.status).toLowerCase()}`;
+      byId("approval-decision-copy").textContent = approval.status === "pending" ? "You do not have permission to decide this request." : "The decision is recorded in the audit log.";
     }
+    byId("topbar-view-name").textContent = `${workflowName} / Approval`;
+    document.title = `Runtrue · ${workflowName} approval`;
+    byId("approval-review-title").focus({ preventScroll: true });
+  }
+
+  function closeApprovalReview() {
+    state.activeApprovalId = null;
+    byId("approval-review-view").hidden = true;
+    byId("approval-queue-view").hidden = false;
+    byId("topbar-view-name").textContent = "Approvals";
+    document.title = "Runtrue · Approvals";
+    byId("approval-queue-view").querySelector("h1")?.focus({ preventScroll: true });
   }
 
   function approvalTitle(approval) {
     if (approval.kind === "privileged-execution" && approval.oneShot === false) return "Approve workflow capabilities";
-    return approval.kind === "privileged-execution" ? "Approve privileged execution" : "Approve workflow changes";
+    return approval.kind === "privileged-execution" ? "Approve privileged execution" : "Approve workflow change";
   }
 
   function approvalKindDescription(kind, oneShot = true) {
-    if (kind === "privileged-execution" && oneShot === false) return "This unchanged workflow requests capabilities that can change repository or external state. Approval grants this exact capability set to matching executions in this repository until it expires.";
-    if (kind === "privileged-execution") return "This plan requests capabilities that can change repository or external state. Approval releases only this signed plan to the runner.";
-    return "The workflow definition or execution inputs changed. Approval authorizes only the reviewed definition and source commit.";
+    if (kind === "privileged-execution" && oneShot === false) return "Matching runs can reuse this access until the approval expires.";
+    if (kind === "privileged-execution") return "This decision applies only to this execution.";
+    return "This decision applies only to this workflow revision and source commit.";
   }
 
   function approvalReasonTitle(code) {
     const titles = {
-      "scm-contents-write": "Repository contents write",
+      "scm-contents-write": "GitHub repository contents write",
       "scm-issues-write": "Issue write access",
       "scm-pull-requests-write": "Pull request write access",
       "scm-statuses-write": "Commit status write access",
@@ -1068,7 +1241,7 @@
       "oidc-access": "OIDC identity access",
       "signing-access": "Signing access",
       "verified-cache-write": "Verified cache write",
-      "repository-write": "Repository write access",
+      "repository-write": "Working tree write access",
     };
     return titles[code] || titleCase(code);
   }
@@ -1093,10 +1266,12 @@
 
   function approvalPermissionSummary(permissions = {}) {
     const entries = [];
-    const add = (label, value, details = []) => { if (value && value !== "deny") entries.push({ label, value: titleCase(value), elevated: value === "write" || value === "allow", details }); };
-    add("Repository", permissions.repository);
-    Object.entries(permissions.scm || {}).forEach(([name, value]) => add(`GitHub ${titleCase(name)}`, value));
-    add("Checks", permissions.checks); add("Artifacts", permissions.artifacts); add("Registry", permissions.registry);
+    const add = (label, value, details = [], scope = "") => { if (value && value !== "deny") entries.push({ label, value: titleCase(value), elevated: value === "write" || value === "allow", details, scope }); };
+    add("Working tree", permissions.repository, [], "Checked-out repository files");
+    Object.entries(permissions.scm || {}).forEach(([name, value]) => add(`GitHub ${titleCase(name)}`, value, [], "GitHub API"));
+    add("Checks", permissions.checks, [], "GitHub checks");
+    add("Artifacts", permissions.artifacts, [], "Run artifacts");
+    add("Registry", permissions.registry, [], "Package registry");
     if (permissions.network?.mode && permissions.network.mode !== "deny") {
       const destinations = (permissions.network.destinations || []).map((destination) => {
         const host = destination.host || "Any host";
@@ -1146,9 +1321,11 @@
       approval.remainingApprovals = result.status === "approved" ? 0 : approval.remainingApprovals;
       renderApprovals();
       renderRepositories();
+      renderOverview();
       if (state.activeRepository) renderRepositoryApprovals((state.data.approvals || []).filter((item) => item.repositoryId === state.activeRepository.id));
-      byId("record-detail-dialog").close();
-      showToast(decision === "approve" ? "Execution approved. Runtrue is preparing the run." : "Execution rejected.");
+      const reusableGrant = approval.kind === "privileged-execution" && approval.oneShot === false;
+      closeApprovalReview();
+      showToast(decision === "approve" ? reusableGrant ? "Workflow capabilities approved." : "Execution approved." : "Request rejected.");
     } catch (error) {
       showToast(error.message || "The approval decision could not be recorded.");
     } finally {
@@ -1163,19 +1340,47 @@
   }
 
   function switchView(view, updateHash = true) {
-    const allowed = ["repositories", "repository", "organization", "secrets", "github", "identity", "runs", "approvals", "runners", "api-tokens", "audit"];
+    if (view === "organization") view = "secrets";
+    if (view !== "approvals" && !byId("approval-review-view").hidden) {
+      state.activeApprovalId = null;
+      byId("approval-review-view").hidden = true;
+      byId("approval-queue-view").hidden = false;
+    }
+    const viewLabels = {
+      overview: "Overview",
+      repositories: "Repositories",
+      repository: state.activeRepository?.key || "Repository",
+      secrets: "Secrets",
+      github: "GitHub",
+      identity: "Users & teams",
+      runs: "Runs",
+      approvals: "Approvals",
+      runners: "Runners",
+      "api-tokens": "API tokens",
+      audit: "Audit",
+    };
+    const allowed = ["overview", "repositories", "repository", "secrets", "github", "identity", "runs", "approvals", "runners", "api-tokens", "audit"];
     const target = document.querySelector(`[data-view="${view}"]`);
     const capability = target?.dataset.capability;
-    if (!allowed.includes(view) || !target || (capability && !state.data.capabilities?.[capability])) view = "repositories";
-    document.querySelectorAll("[data-view]").forEach((element) => { element.hidden = element.dataset.view !== view; });
+    if (!allowed.includes(view) || !target || (capability && !state.data.capabilities?.[capability])) view = "overview";
+    const visibleTarget = document.querySelector(`[data-view="${view}"]`);
+    document.querySelectorAll("[data-view]").forEach((element) => {
+      element.hidden = element.dataset.view !== view;
+      if (element.id === "workspace-main-content") element.removeAttribute("id");
+    });
+    visibleTarget.id = "workspace-main-content";
     document.querySelectorAll("[data-view-target]").forEach((button) => {
       const active = button.dataset.viewTarget === view || (view === "repository" && button.dataset.viewTarget === "repositories");
       button.classList.toggle("active", active);
       if (active) button.setAttribute("aria-current", "page"); else button.removeAttribute("aria-current");
     });
+    byId("topbar-view-name").textContent = viewLabels[view] || "Overview";
+    document.title = `Runtrue · ${viewLabels[view] || "Overview"}`;
     if (updateHash) updateRoute(view === "repository" ? repositoryRoute() : view);
-    if (view === "organization") loadOrganizationSettings();
-    if (view === "secrets") loadSecretInventory();
+    if (view === "secrets") {
+      loadSecretInventory();
+      loadWorkspaceVariables();
+    }
     if (view === "identity") loadIdentity();
     closeNavigation();
     document.querySelector(`[data-view="${view}"] h1`)?.focus({ preventScroll: true });
@@ -1206,7 +1411,7 @@
         return;
       }
     }
-    const requestedView = parts.length === 1 ? parts[0] : "repositories";
+    const requestedView = parts.length === 1 && parts[0] ? parts[0] : "overview";
     const view = switchView(requestedView, false);
     if (route !== view) updateRoute(view, true);
   }
@@ -1466,6 +1671,7 @@
       state.data.runs = dashboard.runs || [];
       configureRunFilters();
       renderRuns();
+      renderOverview();
       if (state.activeRepository) {
         const runs = state.data.runs.filter((run) => run.repositoryId === state.activeRepository.id);
         renderRepositoryRuns(runs);
@@ -1512,6 +1718,11 @@
   function bindEvents() {
     byId("github-signin").addEventListener("click", () => refreshGitHubAccess());
     byId("logout").addEventListener("click", logout);
+    byId("overview-primary-action").addEventListener("click", () => {
+      const action = byId("overview-primary-action").dataset.overviewAction;
+      if (action === "add-repositories") openAddDialog();
+      else switchView(action || "overview");
+    });
     byId("catalog-search").addEventListener("input", renderRepositories);
     document.querySelectorAll("[data-source]").forEach((button) => button.addEventListener("click", () => { state.repositorySource = button.dataset.source; document.querySelectorAll("[data-source]").forEach((item) => { const active = item === button; item.classList.toggle("active", active); item.setAttribute("aria-pressed", String(active)); }); renderRepositories(); }));
     byId("run-search").addEventListener("input", renderRuns); byId("run-status-filter").addEventListener("change", renderRuns);
@@ -1533,17 +1744,27 @@
     byId("close-dialog").addEventListener("click", () => byId("add-repo-dialog").close()); byId("cancel-add").addEventListener("click", () => byId("add-repo-dialog").close()); byId("confirm-add").addEventListener("click", confirmSelectedRepositories); byId("select-all-repositories").addEventListener("click", toggleVisibleRepositories);
     byId("org-search").addEventListener("input", renderOrganizations); byId("repo-search").addEventListener("input", renderRepositoryChoices);
     byId("run-log-filter").addEventListener("change", renderRunLogs);
+    byId("copy-run-event").addEventListener("click", async () => {
+      const payload = byId("run-event-payload").textContent;
+      if (!payload) return;
+      try {
+        await navigator.clipboard.writeText(payload);
+        showToast("Webhook event JSON copied.");
+      } catch {
+        showToast("Could not copy the webhook event JSON.");
+      }
+    });
     byId("retry-run-detail").addEventListener("click", () => { if (state.activeRunId) openRun(state.activeRunId); });
     byId("retry-run").addEventListener("click", (event) => { if (state.activeRunId) retryRun(state.activeRunId, event.currentTarget); });
-    const closeRunDetail = () => { state.activeRunId = null; state.activeRunDetails = null; byId("run-detail-dialog").close(); };
+    const closeRunDetail = () => { state.activeRunId = null; state.activeRunDetails = null; byId("run-event-payload").textContent = ""; byId("run-detail-dialog").close(); };
     byId("close-run-detail").addEventListener("click", closeRunDetail); byId("dismiss-run-detail").addEventListener("click", closeRunDetail);
     byId("run-detail-dialog").addEventListener("close", () => { state.activeRunId = null; state.activeRunDetails = null; });
     byId("close-record-detail").addEventListener("click", () => byId("record-detail-dialog").close()); byId("dismiss-record-detail").addEventListener("click", () => byId("record-detail-dialog").close());
+    byId("back-to-approvals").addEventListener("click", closeApprovalReview);
     byId("approve-workflow-approval").addEventListener("click", () => decideWorkflowApproval("approve")); byId("deny-workflow-approval").addEventListener("click", () => decideWorkflowApproval("deny"));
     byId("add-repository-secret").addEventListener("click", () => openRepositorySetting("secret"));
     byId("add-repository-variable").addEventListener("click", () => openRepositorySetting("variable"));
-    byId("add-organization-secret").addEventListener("click", () => openOrganizationSetting("secret"));
-    byId("add-organization-variable").addEventListener("click", () => openOrganizationSetting("variable"));
+    byId("add-workspace-variable").addEventListener("click", openWorkspaceVariable);
     byId("add-scoped-secret").addEventListener("click", () => openScopedSecret());
     byId("add-secret-project").addEventListener("click", () => openSecretProject());
     byId("scoped-secret-form").addEventListener("submit", saveScopedSecret);
@@ -1582,7 +1803,7 @@
       if (response.status === 401) return showLogin();
       if (!response.ok) return showLogin("The workspace is temporarily unavailable. Please sign in again or retry shortly.");
       state.data = await response.json();
-      showWorkspace(); configureRunFilters(); configureAuditFilters(); renderRepositories(); renderAlert(); renderRuns(); renderApprovals(); renderGitHub(); renderRunners(); renderTokens(); renderAudit();
+      showWorkspace(); configureRunFilters(); configureAuditFilters(); renderOverview(); renderRepositories(); renderAlert(); renderRuns(); renderApprovals(); renderGitHub(); renderRunners(); renderTokens(); renderAudit();
       restoreRoute();
     } catch (error) {
       const detail = error instanceof Error ? `${error.name}: ${error.message}` : "Unknown rendering error";

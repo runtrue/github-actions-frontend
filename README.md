@@ -25,6 +25,22 @@ generation is `2`, and the supported frontend contract generation is `2`.
 The browser UI is versioned and deployed independently from Runtrue core. Its
 backend contract is documented in [`ui/README.md`](ui/README.md).
 
+## Quick-start binary
+
+`product/server` also builds `runtrue-quickstart`, a frontend-owned
+single-process distribution for development and low-environment deployments.
+It embeds this repository's UI and GitHub Actions adapter together with the
+Runtrue backend and its in-process SCM, GitHub lifecycle, scheduler-maintenance,
+runner-control, and optional autoscaler workers:
+
+```text
+cargo build --locked --release -p runtrue-server --bin runtrue-quickstart
+```
+
+The normal core server and standalone UI container remain separate deployment
+options. Job execution runners are deliberately not moved into the trusted
+quick-start process; run a local runner beside it when execution is required.
+
 Before changing this repository to public visibility, make the five pinned
 Runtrue core crates in `Cargo.toml` available to anonymous clean checkouts.
 Repository visibility alone is not sufficient while those exact Git revisions

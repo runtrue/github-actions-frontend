@@ -8,6 +8,22 @@ public; workload-token minting is available only through the runner mTLS
 broker, which validates the exact active execution lease, job, step, capsule,
 audience, and fencing values.
 
+## Quick-start composition
+
+This frontend-owned package emits `runtrue-quickstart`. The executable embeds
+the browser assets and GitHub Actions adapter and runs the backend, SCM worker,
+GitHub lifecycle reconciler, scheduler maintenance, runner-control services,
+and optional embedded autoscaler under one shutdown lifecycle.
+
+Build it with:
+
+```text
+cargo build --locked --release -p runtrue-server --bin runtrue-quickstart
+```
+
+The standalone UI and core server remain available for split deployments.
+Execution runners remain separate because they execute untrusted workloads.
+
 Implemented routes:
 
 - `GET /healthz` and `GET /readyz`

@@ -11,6 +11,10 @@ name = "runtrue-server"
 path = "src/main.rs"
 
 [[bin]]
+name = "runtrue-quickstart"
+path = "src/quickstart_main.rs"
+
+[[bin]]
 name = "runtrue-action-builder"
 path = "src/action_builder_main.rs"
 

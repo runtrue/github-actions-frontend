@@ -1,0 +1,140 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-07-25T21:17:13Z",
+  "title": "Design System: Runtrue Trust Console",
+  "extensions": {
+    "colorMeta": {
+      "action-cobalt": {
+        "role": "primary",
+        "displayName": "Action Cobalt",
+        "canonical": "#1f5bd8",
+        "tonalRamp": ["oklch(28% 0.10 262)", "oklch(38% 0.14 262)", "oklch(48% 0.18 262)", "oklch(58% 0.19 262)", "oklch(68% 0.15 262)", "oklch(78% 0.10 262)", "oklch(88% 0.06 262)", "oklch(95% 0.025 262)"]
+      },
+      "graphite-navigation": {
+        "role": "neutral",
+        "displayName": "Graphite Navigation",
+        "canonical": "#16202e",
+        "tonalRamp": ["oklch(18% 0.025 255)", "oklch(28% 0.025 255)", "oklch(38% 0.022 255)", "oklch(48% 0.018 255)", "oklch(58% 0.015 255)", "oklch(70% 0.012 255)", "oklch(84% 0.008 255)", "oklch(95% 0.004 255)"]
+      },
+      "mineral-canvas": {
+        "role": "neutral",
+        "displayName": "Mineral Canvas",
+        "canonical": "#f2f4f7",
+        "tonalRamp": ["oklch(18% 0.010 252)", "oklch(30% 0.010 252)", "oklch(42% 0.009 252)", "oklch(54% 0.008 252)", "oklch(66% 0.007 252)", "oklch(78% 0.006 252)", "oklch(89% 0.005 252)", "oklch(97% 0.004 252)"]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Control Ink",
+        "canonical": "#111827",
+        "tonalRamp": ["oklch(17% 0.026 265)", "oklch(28% 0.024 265)", "oklch(40% 0.020 265)", "oklch(52% 0.017 265)", "oklch(64% 0.014 265)", "oklch(76% 0.011 265)", "oklch(88% 0.007 265)", "oklch(96% 0.003 265)"]
+      }
+    },
+    "typographyMeta": {
+      "headline": { "displayName": "Page Headline", "purpose": "Fixed-size task identity for product screens." },
+      "body": { "displayName": "Interface Body", "purpose": "Operational copy and descriptions." },
+      "data": { "displayName": "Tabular Data", "purpose": "Identifiers, counts, values, versions, and timestamps." }
+    },
+    "shadows": [
+      { "name": "raised-overlay", "value": "0 16px 42px color-mix(in oklab, #16202e, transparent 84%)", "purpose": "Dialogs, menus, and toasts that sit physically above the workspace." },
+      { "name": "primary-action", "value": "0 4px 10px color-mix(in oklab, #1f5bd8, transparent 78%)", "purpose": "The single dominant action in a task region." },
+      { "name": "surface-rest", "value": "0 1px 2px color-mix(in oklab, #16202e, transparent 94%)", "purpose": "Barely separates the primary data plane from the mineral canvas." }
+    ],
+    "motion": [
+      { "name": "fast", "value": "150ms", "purpose": "Press, hover, focus, and compact control state changes." },
+      { "name": "base", "value": "200ms", "purpose": "Drawers, menus, and occasional state reveals." },
+      { "name": "ease-standard", "value": "cubic-bezier(0.23, 1, 0.32, 1)", "purpose": "Responsive exponential ease-out for interface state." }
+    ],
+    "breakpoints": [
+      { "name": "compact-desktop", "value": "1023px" },
+      { "name": "navigation-drawer", "value": "780px" },
+      { "name": "phone", "value": "639px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The single dominant action in a task region.",
+      "html": "<button class=\"ds-btn-primary\">Add repositories</button>",
+      "css": ".ds-btn-primary { min-height: 44px; padding: 10px 16px; border: 0; border-radius: 6px; background: #1f5bd8; color: #fff; font: 650 14px/1.5 system-ui, sans-serif; box-shadow: 0 4px 10px color-mix(in oklab, #1f5bd8, transparent 78%); cursor: pointer; transition: background-color 150ms cubic-bezier(.23,1,.32,1), transform 150ms cubic-bezier(.23,1,.32,1); } .ds-btn-primary:hover { background: color-mix(in oklab, #1f5bd8, black 8%); } .ds-btn-primary:focus-visible { outline: 0; box-shadow: 0 0 0 3px color-mix(in oklab, #1f5bd8, transparent 70%); } .ds-btn-primary:active { transform: scale(.98); }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "A bounded neutral action for secondary or reversible work.",
+      "html": "<button class=\"ds-btn-secondary\">Review</button>",
+      "css": ".ds-btn-secondary { min-height: 44px; padding: 10px 16px; border: 1px solid #d7dde5; border-radius: 6px; background: #fff; color: #111827; font: 650 14px/1.5 system-ui, sans-serif; cursor: pointer; transition: border-color 150ms cubic-bezier(.23,1,.32,1), transform 150ms cubic-bezier(.23,1,.32,1); } .ds-btn-secondary:hover { border-color: #b9c3d0; } .ds-btn-secondary:focus-visible { outline: 0; box-shadow: 0 0 0 3px color-mix(in oklab, #1f5bd8, transparent 70%); } .ds-btn-secondary:active { transform: scale(.98); }"
+    },
+    {
+      "name": "Search Field",
+      "kind": "input",
+      "refersTo": "text-field",
+      "description": "A white, structurally bounded field for filtering operational data.",
+      "html": "<label class=\"ds-search\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" aria-hidden=\"true\"><circle cx=\"11\" cy=\"11\" r=\"7\"/><path d=\"m20 20-4-4\"/></svg><input placeholder=\"Search repositories\" /></label>",
+      "css": ".ds-search { min-height: 44px; padding: 0 12px; border: 1px solid #d7dde5; border-radius: 6px; display: flex; align-items: center; gap: 8px; background: #fff; color: #5f6b7d; } .ds-search:focus-within { border-color: color-mix(in oklab, #1f5bd8, white 18%); box-shadow: 0 0 0 3px color-mix(in oklab, #1f5bd8, transparent 70%); } .ds-search input { width: 280px; border: 0; outline: 0; background: transparent; color: #111827; font: 400 14px/1.5 system-ui, sans-serif; }"
+    },
+    {
+      "name": "Active Navigation Item",
+      "kind": "nav",
+      "refersTo": "navigation-active",
+      "description": "Solid cobalt selection inside the graphite product rail.",
+      "html": "<button class=\"ds-nav-active\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" aria-hidden=\"true\"><path d=\"M8 3v12m8-6v12M4 7h8a4 4 0 0 1 4 4v2M8 17H6a2 2 0 1 0 2 2v-2Zm8-10h2a2 2 0 1 0-2-2v2Z\"/></svg><span>Repositories</span><small>4</small></button>",
+      "css": ".ds-nav-active { width: 224px; min-height: 40px; padding: 8px; border: 0; border-radius: 6px; display: flex; align-items: center; gap: 10px; background: #1f5bd8; color: #fff; font: 650 14px/1.5 system-ui, sans-serif; box-shadow: 0 4px 12px color-mix(in oklab, #1f5bd8, transparent 72%); } .ds-nav-active small { margin-left: auto; padding: 1px 6px; border-radius: 9999px; background: color-mix(in oklab, white, transparent 82%); color: white; } .ds-nav-active:hover { background: color-mix(in oklab, #1f5bd8, black 8%); } .ds-nav-active:focus-visible { outline: 0; box-shadow: inset 0 0 0 2px color-mix(in oklab, white, transparent 30%); }"
+    },
+    {
+      "name": "Status Badge",
+      "kind": "chip",
+      "description": "A compact semantic state with a haloed dot and plain text.",
+      "html": "<span class=\"ds-state-success\">Ready</span>",
+      "css": ".ds-state-success { display: inline-flex; align-items: center; gap: 8px; color: #168a4b; font: 600 12px/1.5 system-ui, sans-serif; } .ds-state-success::before { content: ''; width: 7px; height: 7px; border-radius: 9999px; background: currentColor; box-shadow: 0 0 0 3px color-mix(in oklab, currentColor, transparent 88%); }"
+    },
+    {
+      "name": "Operational Summary",
+      "kind": "custom",
+      "description": "A divided ledger band for real repository, run, and approval counts.",
+      "html": "<section class=\"ds-summary\"><div><strong>12</strong><small>connected repositories</small></div><div><strong>3</strong><small>active runs</small></div><div><strong>1</strong><small>pending approval</small></div></section>",
+      "css": ".ds-summary { border: 1px solid #d7dde5; border-radius: 10px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); overflow: hidden; background: #fff; } .ds-summary > div { padding: 16px 20px; display: grid; gap: 1px; } .ds-summary > div + div { border-left: 1px solid #d7dde5; } .ds-summary strong { color: #111827; font: 600 20px/1.2 ui-monospace, monospace; } .ds-summary small { color: #5f6b7d; font: 400 12px/1.5 system-ui, sans-serif; }"
+    },
+    {
+      "name": "Attention Queue",
+      "kind": "custom",
+      "description": "An exception-led policy surface exposing the repository, workflow, exact subject, risk, and direct review action.",
+      "html": "<article class=\"ds-attention\"><span>Pending</span><div><strong>Preview</strong><small>Subject sha256:…</small></div><b>62</b><button>Review exact plan</button></article>",
+      "css": ".ds-attention { padding: 16px 20px; border: 1px solid #d7dde5; border-radius: 10px; display: grid; grid-template-columns: 150px minmax(230px, 1fr) 52px auto; align-items: center; gap: 20px; background: #fff; color: #111827; } .ds-attention small { display: block; color: #5f6b7d; font: 600 11px/1.5 ui-monospace, monospace; } .ds-attention b { font: 600 20px/1.2 ui-monospace, monospace; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Verifiable Run",
+    "overview": "Runtrue feels like a trust console built around one verifiable journey: authenticated GitHub event, bounded workflow plan, exact policy decision, fenced runner execution, and durable evidence. The default view is exception-led so daily operators see blocked work first while evaluators can understand the product's distinctive control model from real interface material.\n\nThe system rejects decorative dashboard chrome and instead uses continuous data planes, structural rules, restrained typography, and one action color. Familiar controls disappear into the task; status colors appear only when the underlying state earns them.",
+    "keyCharacteristics": [
+      "Dark graphite navigation anchors the product without turning the workspace into dark mode.",
+      "Mineral-gray canvas separates the application shell from white operational data planes.",
+      "Cobalt marks current location, primary action, and selected state only.",
+      "Tabular metadata and compact status language make live control-plane state easy to compare.",
+      "The default view explains the product through real decisions, source-linked runs, and strictly evidence-backed posture.",
+      "Motion is crisp, state-led, and reduced or removed for frequent interactions."
+    ],
+    "rules": [
+      { "name": "The Earned Color Rule", "body": "Cobalt means action or selection; green, amber, and red mean real backend state. None are decoration.", "section": "colors" },
+      { "name": "The One Boundary Rule", "body": "A surface uses either a structural border or an elevation shadow at rest, never both.", "section": "colors" },
+      { "name": "The Operator Scale Rule", "body": "Type establishes scan order without becoming a spectacle; page headings are the largest text in the product.", "section": "typography" },
+      { "name": "The Flat-at-Rest Rule", "body": "Tables and administration panels sit on the canvas with one structural boundary. Elevation appears only when an element actually moves above the workspace.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do let real repository, run, approval, runner, and policy state drive emphasis.",
+      "Do keep one clear primary action in each task region.",
+      "Do use the system sans for product UI and monospace only for comparable technical data.",
+      "Do preserve visible focus, 44px touch targets, reduced motion, and explicit empty/error/loading states.",
+      "Do keep responsive changes structural: collapse navigation and columns before shrinking type."
+    ],
+    "donts": [
+      "Don't introduce decorative charts, gradients, glass, glow, or metric-card grids.",
+      "Don't use cobalt as ornament or semantic colors for non-state decoration.",
+      "Don't round every element into a pill or nest bordered cards inside bordered cards.",
+      "Don't add motion to frequent navigation, search, filtering, or keyboard-driven actions.",
+      "Don't invent repository health, workflow capability, commercial claims, or operational evidence."
+    ]
+  }
+}

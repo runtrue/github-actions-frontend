@@ -86,6 +86,7 @@ struct Readiness {
 mod audit;
 mod authorization;
 mod browser;
+mod embedded_ui;
 mod github;
 mod middleware;
 mod problem;
@@ -108,6 +109,16 @@ use browser::{
     finish_github_oauth_login, finish_human_oidc_login, form_value, github_credential_cookie,
     html_response, logout_browser_session, oidc_discovery, oidc_jwks, refresh_browser_session,
     valid_return_to,
+};
+use embedded_ui::{
+    app_js as embedded_app_js, favicon as embedded_favicon,
+    frontend_client_error as embedded_frontend_client_error,
+    frontend_health as embedded_frontend_health, index as embedded_index,
+    legacy_index as embedded_legacy_index,
+    legacy_repository_section as embedded_legacy_repository_section,
+    repository_index as embedded_repository_index,
+    repository_section_index as embedded_repository_section_index,
+    styles_css as embedded_styles_css,
 };
 use github::{
     browser_decide_workflow_approval, browser_organization_settings, browser_repository_settings,

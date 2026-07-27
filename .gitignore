@@ -1,1 +1,3 @@
 /target/
+/.impeccable/*
+!/.impeccable/design.json
