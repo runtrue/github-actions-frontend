@@ -27,8 +27,8 @@ use axum::response::Response;
 use axum::Json;
 use runtrue_auth::AuthContext;
 use runtrue_control_plane::{
-    ControlPlaneError, DurableEventRecord, DurableEventSource, GitHubAccountKind,
-    GitHubRepositorySelection, LinkSelectedGitHubRepository, RepositoryRecord,
+    ConfigurationProjectTargetKind, ControlPlaneError, DurableEventRecord, DurableEventSource,
+    GitHubAccountKind, GitHubRepositorySelection, LinkSelectedGitHubRepository, RepositoryRecord,
     SecretMetadataReference,
 };
 use runtrue_model::ContentDigest;
@@ -278,6 +278,53 @@ fn organization_setting_resource(
         privileged: false,
         untrusted: false,
     }
+}
+
+fn effective_secret_payload(
+    secret: &SecretMetadataReference,
+    source_kind: &str,
+    source_id: &str,
+    source_name: &str,
+    inherited: bool,
+) -> Value {
+    json!({
+        "id": secret.id,
+        "tenant_id": secret.tenant_id,
+        "scope": secret.scope,
+        "name": secret.name,
+        "provider": secret.provider,
+        "secret_type": secret.secret_type,
+        "status": secret.status,
+        "current_version": secret.current_version,
+        "created_unix_ms": secret.created_unix_ms,
+        "updated_unix_ms": secret.updated_unix_ms,
+        "source_kind": source_kind,
+        "source_id": source_id,
+        "source_name": source_name,
+        "inherited": inherited,
+        "resolution_status": "resolved",
+    })
+}
+
+fn effective_variable_payload(
+    variable: &runtrue_control_plane::VariableRecord,
+    source_kind: &str,
+    source_id: &str,
+    source_name: &str,
+    inherited: bool,
+) -> Value {
+    json!({
+        "tenant_id": variable.tenant_id,
+        "scope": variable.scope,
+        "name": variable.name,
+        "value": variable.value,
+        "version": variable.version,
+        "updated_unix_ms": variable.updated_unix_ms,
+        "source_kind": source_kind,
+        "source_id": source_id,
+        "source_name": source_name,
+        "inherited": inherited,
+    })
 }
 
 pub(in crate::app) async fn browser_organization_settings(
@@ -724,6 +771,207 @@ pub(in crate::app) async fn browser_repository_settings(
         Ok(items) => items,
         Err(error) => return control_plane_problem(&request_id, error),
     };
+    let workspace_variables = match state
+        .store
+        .variable_records(&context.tenant_id, &format!("tenant:{}", context.tenant_id))
+        .await
+    {
+        Ok(items) => items,
+        Err(error) => return control_plane_problem(&request_id, error),
+    };
+    let scm_account_id = match state
+        .store
+        .github_account_id_for_repository(&context.tenant_id, &repository.id)
+        .await
+    {
+        Ok(account_id) => Some(account_id),
+        Err(ControlPlaneError::NotFound { .. }) => None,
+        Err(error) => return control_plane_problem(&request_id, error),
+    };
+    let scm_account_name = if let Some(account_id) = scm_account_id.as_deref() {
+        match state
+            .store
+            .github_installations_for_tenant(&context.tenant_id, None, 100)
+            .await
+        {
+            Ok(installations) => installations
+                .into_iter()
+                .find(|installation| installation.account_external_id == account_id)
+                .map_or_else(
+                    || account_id.to_owned(),
+                    |installation| installation.account_login,
+                ),
+            Err(error) => return control_plane_problem(&request_id, error),
+        }
+    } else {
+        String::new()
+    };
+    let projects = match state.store.projects(&context.tenant_id).await {
+        Ok(projects) => projects
+            .into_iter()
+            .filter(|project| {
+                project.status == "active"
+                    && project.targets.iter().any(|target| match target.kind {
+                        ConfigurationProjectTargetKind::Repository => target.id == repository.id,
+                        ConfigurationProjectTargetKind::ScmAccount => {
+                            scm_account_id.as_deref() == Some(target.id.as_str())
+                        }
+                    })
+            })
+            .collect::<Vec<_>>(),
+        Err(error) => return control_plane_problem(&request_id, error),
+    };
+    let workspace_secrets = match state
+        .store
+        .secrets(&context.tenant_id, &format!("tenant:{}", context.tenant_id))
+        .await
+    {
+        Ok(items) => items,
+        Err(error) => return control_plane_problem(&request_id, error),
+    };
+    let scm_account_secrets = if let Some(account_id) = scm_account_id.as_deref() {
+        match state
+            .store
+            .secrets(&context.tenant_id, &format!("scm-account:{account_id}"))
+            .await
+        {
+            Ok(items) => items,
+            Err(error) => return control_plane_problem(&request_id, error),
+        }
+    } else {
+        Vec::new()
+    };
+    let mut project_secrets = Vec::with_capacity(projects.len());
+    for project in &projects {
+        let scoped = match state
+            .store
+            .secrets(&context.tenant_id, &format!("project:{}", project.id))
+            .await
+        {
+            Ok(items) => items,
+            Err(error) => return control_plane_problem(&request_id, error),
+        };
+        project_secrets.push((project, scoped));
+    }
+    let mut secret_names = BTreeSet::new();
+    for secret in secrets
+        .iter()
+        .chain(workspace_secrets.iter())
+        .chain(scm_account_secrets.iter())
+        .chain(
+            project_secrets
+                .iter()
+                .flat_map(|(_, project_items)| project_items.iter()),
+        )
+        .filter(|secret| secret.status == "active")
+    {
+        secret_names.insert(secret.name.clone());
+    }
+    let repository_name = format!("{}/{}", repository.owner, repository.name);
+    let mut effective_secrets = Vec::with_capacity(secret_names.len());
+    for name in secret_names {
+        if let Some(secret) = secrets
+            .iter()
+            .find(|secret| secret.name == name && secret.status == "active")
+        {
+            effective_secrets.push(effective_secret_payload(
+                secret,
+                "repository",
+                &repository.id,
+                &repository_name,
+                false,
+            ));
+            continue;
+        }
+        let matching_project_secrets = project_secrets
+            .iter()
+            .filter_map(|(project, project_items)| {
+                project_items
+                    .iter()
+                    .find(|secret| secret.name == name && secret.status == "active")
+                    .map(|secret| (*project, secret))
+            })
+            .collect::<Vec<_>>();
+        if matching_project_secrets.len() > 1 {
+            effective_secrets.push(json!({
+                "name": name,
+                "status": "blocked",
+                "source_kind": "project",
+                "source_name": matching_project_secrets
+                    .iter()
+                    .map(|(project, _)| project.name.clone())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                "inherited": true,
+                "resolution_status": "ambiguous",
+                "project_ids": matching_project_secrets
+                    .iter()
+                    .map(|(project, _)| project.id.clone())
+                    .collect::<Vec<_>>(),
+            }));
+            continue;
+        }
+        if let Some((project, secret)) = matching_project_secrets.first() {
+            effective_secrets.push(effective_secret_payload(
+                secret,
+                "project",
+                &project.id,
+                &project.name,
+                true,
+            ));
+            continue;
+        }
+        if let Some(secret) = scm_account_secrets
+            .iter()
+            .find(|secret| secret.name == name && secret.status == "active")
+        {
+            effective_secrets.push(effective_secret_payload(
+                secret,
+                "scm_account",
+                scm_account_id.as_deref().unwrap_or_default(),
+                &scm_account_name,
+                true,
+            ));
+            continue;
+        }
+        if let Some(secret) = workspace_secrets
+            .iter()
+            .find(|secret| secret.name == name && secret.status == "active")
+        {
+            effective_secrets.push(effective_secret_payload(
+                secret,
+                "workspace",
+                &context.tenant_id,
+                "Workspace",
+                true,
+            ));
+        }
+    }
+    let mut effective_variables = BTreeMap::new();
+    for variable in &workspace_variables {
+        effective_variables.insert(
+            variable.name.clone(),
+            effective_variable_payload(
+                variable,
+                "workspace",
+                &context.tenant_id,
+                "Workspace",
+                true,
+            ),
+        );
+    }
+    for variable in &variables {
+        effective_variables.insert(
+            variable.name.clone(),
+            effective_variable_payload(
+                variable,
+                "repository",
+                &repository.id,
+                &repository_name,
+                false,
+            ),
+        );
+    }
     let workflow_directory_override = match state
         .store
         .repository_workflow_directory(&context.tenant_id, &repository.id)
@@ -737,7 +985,9 @@ pub(in crate::app) async fn browser_repository_settings(
         workflow_directory_override.unwrap_or_else(|| state.scm_workflow_directory.clone());
     let mut response = Json(json!({
         "secrets": secrets,
+        "effective_secrets": effective_secrets,
         "variables": variables,
+        "effective_variables": effective_variables.into_values().collect::<Vec<_>>(),
         "workflow_directory": workflow_directory,
         "workflow_directory_inherited": workflow_directory_inherited,
     }))
@@ -1904,6 +2154,31 @@ pub(in crate::app) async fn browser_run_detail(
         Ok(capsule) => capsule,
         Err(_) => return internal_problem(&request_id),
     };
+    let webhook_event = if browser_session_is_github_admin(&state, &context) {
+        browser_scm_event(&capsule).and_then(|event| {
+            let event_kind = match &event.event_type {
+                runtrue_scm::EventType::Push => "push",
+                runtrue_scm::EventType::PullRequest { .. } => "pull_request",
+                runtrue_scm::EventType::IssueComment { .. } => "issue_comment",
+                runtrue_scm::EventType::CheckRun { .. } => "check_run",
+                runtrue_scm::EventType::MergeGroup => "merge_group",
+                runtrue_scm::EventType::Ping => "ping",
+            };
+            let received_at = timestamp(event.received_unix_ms).ok()?;
+            let payload = serde_json::to_value(&event).ok()?;
+            Some(json!({
+                "provider": "github",
+                "eventKind": event_kind,
+                "deliveryId": event.event_id,
+                "receivedAt": received_at,
+                "rawPayloadDigest": event.raw_payload_digest,
+                "normalizedDigest": event.normalized_digest,
+                "payload": runtrue_workflow_ir::canonicalize_value(payload),
+            }))
+        })
+    } else {
+        None
+    };
     let capsule_jobs = capsule
         .jobs
         .into_iter()
@@ -1997,11 +2272,14 @@ pub(in crate::app) async fn browser_run_detail(
         Ok(jobs) => jobs,
         Err(response) => return response,
     };
-    let payload = json!({
+    let mut payload = json!({
         "jobs": jobs,
         "logs": logs,
         "logsTruncated": frame_limit_reached || byte_limit_reached,
     });
+    if let (Some(payload), Some(webhook_event)) = (payload.as_object_mut(), webhook_event) {
+        payload.insert("webhookEvent".to_owned(), webhook_event);
+    }
     let mut response = Json(payload).into_response();
     response
         .headers_mut()
@@ -2681,9 +2959,37 @@ fn browser_run_source(capsule: &ExecutionCapsule, repository_url: Option<&str>) 
         .as_ref()
         .and_then(|value| value.pointer("/pull_request/number"))
         .and_then(Value::as_u64);
+    let issue_number = event
+        .as_ref()
+        .and_then(|value| value.pointer("/issue_comment/issue_number"))
+        .and_then(Value::as_u64);
+    let issue_is_pull_request = event
+        .as_ref()
+        .and_then(|value| value.pointer("/issue_comment/issue_is_pull_request"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let comment_id = event
+        .as_ref()
+        .and_then(|value| value.pointer("/issue_comment/comment_id"))
+        .and_then(Value::as_u64);
     let source_url = repository_url.map(|url| {
-        if let Some(number) = pull_request_number {
-            format!("{}/pull/{number}", url.trim_end_matches('/'))
+        let repository_url = url.trim_end_matches('/');
+        if event_kind == "issue_comment" {
+            if let Some(number) = issue_number {
+                let conversation = if issue_is_pull_request {
+                    "pull"
+                } else {
+                    "issues"
+                };
+                let anchor = comment_id
+                    .map(|id| format!("#issuecomment-{id}"))
+                    .unwrap_or_default();
+                format!("{repository_url}/{conversation}/{number}{anchor}")
+            } else {
+                repository_url.to_owned()
+            }
+        } else if let Some(number) = pull_request_number {
+            format!("{repository_url}/pull/{number}")
         } else if capsule.context.source_commit.len() >= 7
             && capsule
                 .context
@@ -2693,11 +2999,10 @@ fn browser_run_source(capsule: &ExecutionCapsule, repository_url: Option<&str>) 
         {
             format!(
                 "{}/commit/{}",
-                url.trim_end_matches('/'),
-                capsule.context.source_commit
+                repository_url, capsule.context.source_commit
             )
         } else {
-            url.to_owned()
+            repository_url.to_owned()
         }
     });
 
@@ -2710,6 +3015,8 @@ fn browser_run_source(capsule: &ExecutionCapsule, repository_url: Option<&str>) 
         "refName": ref_name,
         "commitSha": capsule.context.source_commit,
         "pullRequestNumber": pull_request_number,
+        "issueNumber": issue_number,
+        "commentId": comment_id,
         "url": source_url,
         "jobCount": capsule.jobs.len(),
     })
@@ -2727,6 +3034,27 @@ fn browser_scm_event(capsule: &ExecutionCapsule) -> Option<EventEnvelope> {
         return None;
     }
     Some(event)
+}
+
+fn browser_session_is_github_admin(state: &AppState, context: &AuthContext) -> bool {
+    state
+        .human_oidc
+        .as_ref()
+        .and_then(|human| human.github_oauth.as_ref())
+        .is_some_and(|github| {
+            configured_github_role_is_admin(&context.principal_id, &github.allowed_roles)
+        })
+}
+
+fn configured_github_role_is_admin(
+    principal_id: &str,
+    allowed_roles: &BTreeMap<u64, String>,
+) -> bool {
+    principal_id
+        .strip_prefix("github-")
+        .and_then(|value| value.parse::<u64>().ok())
+        .and_then(|github_user_id| allowed_roles.get(&github_user_id))
+        .is_some_and(|role| role == "admin")
 }
 
 fn durable_scm_event_id(provider_event_id: &str) -> String {
@@ -3196,7 +3524,7 @@ mod user_catalog_tests {
 
     #[test]
     fn run_source_links_to_the_originating_pull_request() {
-        let capsule = ExecutionCapsule {
+        let mut capsule = ExecutionCapsule {
             schema_version: CAPSULE_SCHEMA_VERSION,
             engine_compatibility_version: ENGINE_COMPATIBILITY_VERSION.to_owned(),
             compiler_version: "test".to_owned(),
@@ -3244,6 +3572,53 @@ mod user_catalog_tests {
         assert_eq!(source["actor"], "ada");
         assert_eq!(source["pullRequestNumber"], 42);
         assert_eq!(source["url"], "https://github.example/octo/repo/pull/42");
+
+        capsule.context.normalized_event_json = Some(
+            json!({
+                "event_type": {"kind": "issue_comment", "action": "created"},
+                "actor": {"login": "ada"},
+                "issue_comment": {
+                    "issue_number": 42,
+                    "issue_is_pull_request": true,
+                    "comment_id": 314
+                }
+            })
+            .to_string(),
+        );
+        let source = browser_run_source(&capsule, Some("https://github.example/octo/repo/"));
+        assert_eq!(source["eventKind"], "issue_comment");
+        assert_eq!(source["issueNumber"], 42);
+        assert_eq!(source["commentId"], 314);
+        assert_eq!(
+            source["url"],
+            "https://github.example/octo/repo/pull/42#issuecomment-314"
+        );
+
+        capsule.context.normalized_event_json = Some(
+            json!({
+                "event_type": {"kind": "issue_comment", "action": "edited"},
+                "issue_comment": {
+                    "issue_number": 7,
+                    "issue_is_pull_request": false,
+                    "comment_id": 2718
+                }
+            })
+            .to_string(),
+        );
+        let source = browser_run_source(&capsule, Some("https://github.example/octo/repo"));
+        assert_eq!(
+            source["url"],
+            "https://github.example/octo/repo/issues/7#issuecomment-2718"
+        );
+    }
+
+    #[test]
+    fn webhook_event_diagnostics_require_the_configured_github_admin_role() {
+        let roles = BTreeMap::from([(42, "admin".to_owned()), (84, "operator".to_owned())]);
+        assert!(configured_github_role_is_admin("github-42", &roles));
+        assert!(!configured_github_role_is_admin("github-84", &roles));
+        assert!(!configured_github_role_is_admin("user-42", &roles));
+        assert!(!configured_github_role_is_admin("github-invalid", &roles));
     }
 
     #[test]

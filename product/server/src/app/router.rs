@@ -12,21 +12,24 @@ use crate::app::{
     decide_approval, delete_browser_organization_secret, delete_browser_organization_variable,
     delete_browser_repository_secret, delete_browser_repository_variable,
     delete_browser_scoped_secret, delete_secret, delete_variable, download_artifact, drain_runner,
-    effective_user_repository_access, finish_github_installation, finish_github_oauth_login,
-    finish_human_oidc_login, get_approval, get_artifact, get_artifact_provenance, get_capsule,
-    get_event, get_replay_bundle, get_repository, get_run, get_run_logs, get_runner,
-    get_runner_capsule_trust_key, get_runner_fleet, get_runner_pool, get_secret_metadata, get_team,
-    get_user, get_variable, get_workflow_frontend_report, github_app_status, github_browser_state,
-    github_webhook, health, link_github_repository_from_ui, list_api_tokens, list_approvals,
-    list_audit_events, list_repositories, list_repository_access, list_runner_pools, list_runners,
-    list_runs, list_secret_metadata, list_team_members, list_teams, list_users,
-    logout_browser_session, oidc_discovery, oidc_jwks, plan_runner_replacement, promote_artifact,
-    promote_cache, put_repository_access, put_runner_slot, put_runner_update_policy,
-    put_runner_update_release, put_variable, readiness, refresh_browser_session,
-    remove_team_member, replay_event, request_context, require_bearer,
-    require_writable_control_plane, require_writable_human_auth, revoke_api_token,
-    revoke_github_installation, revoke_repository_access, rotate_secret, route_not_found,
-    save_browser_configuration_project, save_browser_organization_secret,
+    effective_user_repository_access, embedded_app_js, embedded_favicon,
+    embedded_frontend_client_error, embedded_frontend_health, embedded_index,
+    embedded_legacy_index, embedded_legacy_repository_section, embedded_repository_index,
+    embedded_repository_section_index, embedded_styles_css, finish_github_installation,
+    finish_github_oauth_login, finish_human_oidc_login, get_approval, get_artifact,
+    get_artifact_provenance, get_capsule, get_event, get_replay_bundle, get_repository, get_run,
+    get_run_logs, get_runner, get_runner_capsule_trust_key, get_runner_fleet, get_runner_pool,
+    get_secret_metadata, get_team, get_user, get_variable, get_workflow_frontend_report,
+    github_app_status, github_browser_state, github_webhook, health,
+    link_github_repository_from_ui, list_api_tokens, list_approvals, list_audit_events,
+    list_repositories, list_repository_access, list_runner_pools, list_runners, list_runs,
+    list_secret_metadata, list_team_members, list_teams, list_users, logout_browser_session,
+    oidc_discovery, oidc_jwks, plan_runner_replacement, promote_artifact, promote_cache,
+    put_repository_access, put_runner_slot, put_runner_update_policy, put_runner_update_release,
+    put_variable, readiness, refresh_browser_session, remove_team_member, replay_event,
+    request_context, require_bearer, require_writable_control_plane, require_writable_human_auth,
+    revoke_api_token, revoke_github_installation, revoke_repository_access, rotate_secret,
+    route_not_found, save_browser_configuration_project, save_browser_organization_secret,
     save_browser_organization_variable, save_browser_repository_secret,
     save_browser_repository_variable, save_browser_repository_workflow_directory,
     save_browser_scoped_secret, start_github_installation_from_ui, sync_github_installation,
@@ -342,6 +345,28 @@ pub fn router(state: AppState) -> Router {
     };
 
     Router::new()
+        .route("/", get(embedded_index))
+        .route("/assets/app.js", get(embedded_app_js))
+        .route("/assets/styles.css", get(embedded_styles_css))
+        .route("/favicon.svg", get(embedded_favicon))
+        .route("/frontend-healthz", get(embedded_frontend_health))
+        .route(
+            "/frontend-client-error",
+            post(embedded_frontend_client_error).layer(DefaultBodyLimit::max(2048)),
+        )
+        .route(
+            "/repositories/:owner/:repository",
+            get(embedded_repository_index),
+        )
+        .route(
+            "/repositories/:owner/:repository/:section",
+            get(embedded_repository_section_index),
+        )
+        .route("/ui/github/installations", get(embedded_legacy_index))
+        .route(
+            "/ui/github/installations/repositories/:owner/:repository/:section",
+            get(embedded_legacy_repository_section),
+        )
         .route("/healthz", get(health))
         .route("/readyz", get(readiness))
         .route("/.well-known/openid-configuration", get(oidc_discovery))
