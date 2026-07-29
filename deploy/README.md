@@ -26,6 +26,7 @@ mutable version tag.
 ## Publishing prerequisites
 
 The `Publish product images` workflow uses the repository `GITHUB_TOKEN` to
-publish both images to GHCR. The product server also compiles private Rust
-dependencies from `runtrue/runtrue`, so the repository must have a
-`RUNTRUE_SOURCE_TOKEN` Actions secret with read-only access to that repository.
+publish both images to GHCR. The product server compiles Rust dependencies from
+`runtrue/runtrue` anonymously when that repository is public. While it remains
+private, set a `RUNTRUE_SOURCE_TOKEN` Actions secret with read-only access to
+that repository.

@@ -59,8 +59,9 @@ jobs:
         env:
           RUNTRUE_SOURCE_TOKEN: ${{ secrets.RUNTRUE_SOURCE_TOKEN }}
         run: |
-          if [ -z "${RUNTRUE_SOURCE_TOKEN}" ]; then
-            echo "::error::RUNTRUE_SOURCE_TOKEN must grant read access to runtrue/runtrue."
+          if [ -z "${RUNTRUE_SOURCE_TOKEN}" ] &&
+             ! git ls-remote --exit-code https://github.com/runtrue/runtrue.git HEAD >/dev/null 2>&1; then
+            echo "::error::runtrue/runtrue must be public or RUNTRUE_SOURCE_TOKEN must grant read access."
             exit 1
           fi
 

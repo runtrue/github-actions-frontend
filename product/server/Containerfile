@@ -9,11 +9,13 @@ COPY . .
 RUN --mount=type=cache,id=runtrue-gha-cargo-registry-v1,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=runtrue-gha-cargo-git-v1,target=/usr/local/cargo/git,sharing=locked \
     --mount=type=cache,id=runtrue-gha-release-target-v1,target=/src/target,sharing=locked \
-    --mount=type=secret,id=github_token,required=true \
+    --mount=type=secret,id=github_token \
     set -eu; \
-    git config --global credential.https://github.com.username x-access-token; \
-    git config --global credential.helper \
-      '!f() { if test "$1" = get; then echo username=x-access-token; printf "password="; cat /run/secrets/github_token; echo; fi; }; f'; \
+    if test -s /run/secrets/github_token; then \
+      git config --global credential.https://github.com.username x-access-token; \
+      git config --global credential.helper \
+        '!f() { if test "$1" = get; then echo username=x-access-token; printf "password="; cat /run/secrets/github_token; echo; fi; }; f'; \
+    fi; \
     CARGO_NET_GIT_FETCH_WITH_CLI=true \
       cargo build --locked --release -p runtrue-server --bin runtrue-server; \
     install -D -m 0555 target/release/runtrue-server /out/runtrue-server; \
