@@ -269,6 +269,41 @@ svg { display: block; }
 .auth-view .muted-copy { max-width: 46ch; margin-bottom: var(--space-6); font-size: var(--text-sm); }
 .auth-view > .btn-primary { width: 100%; min-height: 48px; }
 .auth-status { align-items: center; justify-content: center; text-align: center; }
+.auth-status h2 { margin-bottom: var(--space-2); }
+.auth-status .muted-copy { margin-bottom: var(--space-2); }
+.auth-return-note { margin: 0; color: var(--muted); font-size: var(--text-xs); }
+
+.auth-route {
+  width: 184px;
+  margin: 0 auto var(--space-6);
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) 44px;
+  align-items: center;
+}
+
+.auth-route-node {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-md);
+  display: grid;
+  place-items: center;
+}
+
+.auth-route-node svg { width: 22px; height: 22px; }
+.auth-route-runtrue { background: var(--accent); color: var(--accent-on); }
+.auth-route-github { background: var(--sidebar); color: var(--sidebar-fg); }
+.auth-route-track { height: 2px; position: relative; overflow: hidden; background: var(--border); }
+
+.auth-route-signal {
+  width: 24px;
+  height: 100%;
+  position: absolute;
+  inset-block: 0;
+  left: -24px;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  animation: auth-route-signal 1100ms var(--ease-standard) infinite;
+}
 
 .spinner { width: 40px; height: 40px; margin-bottom: var(--space-6); border: 3px solid var(--border); border-top-color: var(--accent); border-radius: var(--radius-pill); animation: spin 700ms linear infinite; }
 .state-icon { width: 48px; height: 48px; margin-bottom: var(--space-5); border: 1px solid var(--border); border-radius: var(--radius-pill); display: grid; place-items: center; }
@@ -280,10 +315,13 @@ svg { display: block; }
 @keyframes enter { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes boot-progress { from { transform: translateX(0); } to { transform: translateX(36px); } }
+@keyframes auth-route-signal { to { transform: translateX(116px); } }
 
 @media (prefers-reduced-motion: reduce) {
   .boot-progress::after,
-  .spinner { animation: none; }
+  .spinner,
+  .auth-route-signal { animation: none; }
+  .auth-route-signal { left: 50%; transform: translateX(-50%); }
 }
 
 /* Tenant identity management. */

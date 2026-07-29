@@ -149,6 +149,7 @@
   }
 
   function showLogin(message = "") {
+    resetGitHubHandoff();
     byId("boot-shell").hidden = true;
     byId("login-shell").hidden = false;
     byId("workspace").hidden = true;
@@ -1647,8 +1648,35 @@
     submitLocalForm("/github/installations/start", fields);
   }
 
+  function resetGitHubHandoff() {
+    const card = byId("auth-card");
+    const button = byId("github-signin");
+    card.removeAttribute("aria-busy");
+    button.disabled = false;
+    byId("auth-sign-in").hidden = false;
+    byId("auth-handoff").hidden = true;
+  }
+
+  function showGitHubHandoff() {
+    const card = byId("auth-card");
+    const button = byId("github-signin");
+    card.setAttribute("aria-busy", "true");
+    button.disabled = true;
+    byId("auth-sign-in").hidden = true;
+    byId("auth-handoff").hidden = false;
+  }
+
   function refreshGitHubAccess() {
-    location.assign(`/auth/login?return_to=${encodeURIComponent(`${location.pathname}${location.search}`)}`);
+    const destination = `/auth/login?return_to=${encodeURIComponent(`${location.pathname}${location.search}`)}`;
+    let navigating = false;
+    const navigate = () => {
+      if (navigating) return;
+      navigating = true;
+      location.assign(destination);
+    };
+    showGitHubHandoff();
+    requestAnimationFrame(() => requestAnimationFrame(navigate));
+    setTimeout(navigate, 150);
   }
 
   async function reloadGitHubData() {
@@ -1792,6 +1820,7 @@
     byId("cancel-uninstall-repository").addEventListener("click", () => byId("uninstall-repository-dialog").close());
     byId("confirm-uninstall-repository").addEventListener("click", uninstallRepository);
     window.addEventListener("popstate", restoreRoute);
+    window.addEventListener("pageshow", resetGitHubHandoff);
   }
 
   async function start() {

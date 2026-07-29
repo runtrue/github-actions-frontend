@@ -208,15 +208,22 @@ test("run details keep source links intact and defer technical metadata", async 
   assert.match(styles, /\.run-log-view\.is-empty \{[^}]*background: var\(--bg\)/);
 });
 
-test("login uses a compact centered card", async () => {
-  const [html, styles] = await Promise.all([
+test("login uses a compact centered card with a visible GitHub handoff", async () => {
+  const [html, styles, script] = await Promise.all([
     readFile(new URL("../public/index.html", import.meta.url), "utf8"),
     readFile(new URL("../public/styles.css", import.meta.url), "utf8"),
+    readFile(new URL("../public/app.js", import.meta.url), "utf8"),
   ]);
 
   assert.match(styles, /\.login-shell\s*\{[^}]*place-items:\s*center/s);
   assert.match(styles, /\.auth-card\s*\{[^}]*420px/s);
   assert.doesNotMatch(styles, /\.auth-card\s*\{[^}]*min-height/s);
+  assert.match(html, /id="auth-handoff"[^>]*role="status"[^>]*hidden/);
+  assert.match(html, /Opening GitHub/);
+  assert.match(styles, /\.auth-route-signal\s*\{[^}]*animation:/s);
+  assert.match(script, /function showGitHubHandoff\(\)/);
+  assert.match(script, /requestAnimationFrame\(\(\) => requestAnimationFrame\(navigate\)\)/);
+  assert.match(script, /window\.addEventListener\("pageshow", resetGitHubHandoff\)/);
   assert.doesNotMatch(html, /class="trust-note"/);
   assert.doesNotMatch(html, /class="login-footer"/);
 });
