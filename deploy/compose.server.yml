@@ -1,0 +1,6 @@
+services:
+  server:
+    image: "${RUNTRUE_GITHUB_PRODUCT_SERVER_IMAGE:?set a digest-pinned ghcr.io/runtrue/github-actions-server image}"
+    build: !reset null
+    environment:
+      RUNTRUE_SCM_WORKFLOW_DIRECTORY: .github/workflows

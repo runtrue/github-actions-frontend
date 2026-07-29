@@ -1,0 +1,7 @@
+.git
+.agents
+.impeccable
+.runtrue
+target
+**/*.swp
+**/.DS_Store
