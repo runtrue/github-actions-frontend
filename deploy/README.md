@@ -18,8 +18,10 @@ files after the Runtrue Compose files:
 ```
 
 The images are published as `ghcr.io/runtrue/github-actions-server` and
-`ghcr.io/runtrue/github-actions-frontend-ui`. Deploy the digest returned by the
-successful publication workflow rather than a mutable branch or version tag.
+`ghcr.io/runtrue/github-actions-frontend-ui` when a `v*` release tag is pushed.
+Pull requests build both images for validation without publishing them. Deploy
+the digest returned by the successful publication workflow rather than a
+mutable version tag.
 
 ## Publishing prerequisites
 
