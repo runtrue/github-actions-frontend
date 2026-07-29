@@ -199,6 +199,7 @@ test("run details keep source links intact and defer technical metadata", async 
 
   assert.match(styles, /\.run-source-link \{[^}]*display: inline-flex;/);
   assert.match(styles, /\.overview-run-workflow \{[^}]*align-items: baseline;/);
+  assert.match(styles, /\.user-chip \{[^}]*border-radius: var\(--radius-md\);/);
   assert.match(html, /class="run-technical-details"/);
   assert.match(html, /id="run-event-section"/);
   assert.doesNotMatch(html, /Admin only|Authenticated and normalized after GitHub signature verification/);
