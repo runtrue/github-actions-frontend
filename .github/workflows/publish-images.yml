@@ -100,8 +100,7 @@ jobs:
           build-args: |
             RUNTRUE_VERSION=${{ github.ref_name }}
             RUNTRUE_REVISION=${{ github.sha }}
-          secrets: |
-            github_token=${{ secrets.RUNTRUE_SOURCE_TOKEN }}
+          secrets: ${{ matrix.image == 'github-actions-server' && format('github_token={0}', secrets.RUNTRUE_SOURCE_TOKEN) || '' }}
           cache-from: type=gha,scope=${{ matrix.image }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image }}
           provenance: ${{ github.event_name != 'pull_request' && 'mode=max' || 'false' }}
