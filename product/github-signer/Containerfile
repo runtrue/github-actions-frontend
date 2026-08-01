@@ -1,0 +1,27 @@
+# syntax=docker/dockerfile:1.10@sha256:865e5dd094beca432e8c0a1d5e1c465db5f998dca4e439981029b3b81fb39ed5
+ARG GO_IMAGE=docker.io/library/golang:1.26.0-bookworm@sha256:2a0ba12e116687098780d3ce700f9ce3cb340783779646aafbabed748fa6677c
+ARG RUNTIME_IMAGE=docker.io/library/debian:bookworm-20250630-slim@sha256:6ac2c08566499cc2415926653cf2ed7c3aedac445675a013cc09469c9e118fdd
+
+FROM ${GO_IMAGE} AS build
+WORKDIR /src
+COPY . ./
+RUN CGO_ENABLED=0 go test ./... && \
+    CGO_ENABLED=0 go build -trimpath -ldflags='-s -w -buildid=' \
+      -o /out/runtrue-github-signer .
+
+FROM ${RUNTIME_IMAGE} AS runtime
+ARG RUNTRUE_VERSION=0.1.0
+ARG RUNTRUE_REVISION=unknown
+LABEL org.opencontainers.image.title="Runtrue GitHub App signer" \
+      org.opencontainers.image.description="Isolated GitHub App JWT signer for Runtrue" \
+      org.opencontainers.image.source="https://github.com/runtrue/github-actions-frontend" \
+      org.opencontainers.image.version="${RUNTRUE_VERSION}" \
+      org.opencontainers.image.revision="${RUNTRUE_REVISION}" \
+      org.opencontainers.image.licenses="Apache-2.0"
+RUN groupadd --gid 10001 --system runtrue && \
+    useradd --uid 10001 --gid 10001 --system --no-create-home \
+      --home-dir /nonexistent --shell /usr/sbin/nologin runtrue
+COPY --from=build --chown=0:0 /out/runtrue-github-signer /usr/local/bin/runtrue-github-signer
+RUN chmod 0555 /usr/local/bin/runtrue-github-signer
+USER 10001:10001
+ENTRYPOINT ["/usr/local/bin/runtrue-github-signer"]
