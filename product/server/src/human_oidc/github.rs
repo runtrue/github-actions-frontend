@@ -3,9 +3,10 @@ use crate::human_oidc::{
         encode_query_component, read_bounded, read_bounded_zeroizing, validate_external_endpoint,
         validate_secret_text, PublicOnlyOidcResolver,
     },
-    validate_human_oidc_public_origin, GitHubAccessToken, GitHubUserCatalog, GitHubUserRepository,
-    HumanOidcError, HumanOidcLimits, VerifiedGitHubIdentity, MAX_AUTHORIZATION_CODE_BYTES,
-    MAX_OIDC_RESPONSE_HEADER_BYTES, MAX_TOKEN_RESPONSE_BYTES,
+    validate_human_oidc_public_origin, GitHubAccessToken, GitHubUserCatalog,
+    GitHubUserInstallation, GitHubUserRepository, HumanOidcError, HumanOidcLimits,
+    VerifiedGitHubIdentity, MAX_AUTHORIZATION_CODE_BYTES, MAX_OIDC_RESPONSE_HEADER_BYTES,
+    MAX_TOKEN_RESPONSE_BYTES,
 };
 use runtrue_model::ContentDigest;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -27,6 +28,13 @@ pub trait GitHubOauthAdapter: Send + Sync {
     fn authorized_organizations(&self, access_token: &str) -> Result<Vec<String>, HumanOidcError> {
         self.authorized_catalog(access_token)
             .map(|catalog| catalog.organizations)
+    }
+
+    fn authorized_installations(
+        &self,
+        _access_token: &str,
+    ) -> Result<Vec<GitHubUserInstallation>, HumanOidcError> {
+        Ok(Vec::new())
     }
 
     fn authorized_repositories(
@@ -136,6 +144,25 @@ struct GitHubOrganizationMembershipResponse {
 }
 
 #[derive(Deserialize)]
+struct GitHubInstallationAccountResponse {
+    id: u64,
+    login: String,
+}
+
+#[derive(Deserialize)]
+struct GitHubInstallationResponse {
+    id: u64,
+    account: GitHubInstallationAccountResponse,
+    #[serde(default)]
+    suspended_at: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct GitHubInstallationPageResponse {
+    installations: Vec<GitHubInstallationResponse>,
+}
+
+#[derive(Deserialize)]
 struct GitHubRepositoryResponse {
     id: u64,
     name: String,
@@ -154,11 +181,11 @@ fn github_organization_memberships_path(page: usize) -> String {
 }
 
 impl HardenedGitHubOauthClient {
-    fn catalog_page<T: DeserializeOwned>(
+    fn catalog_response<T: DeserializeOwned>(
         &self,
         path_and_query: &str,
         access_token: &str,
-    ) -> Result<Vec<T>, HumanOidcError> {
+    ) -> Result<T, HumanOidcError> {
         validate_secret_text(access_token, 2048, HumanOidcError::InvalidTokenResponse)?;
         let authorization = Zeroizing::new(format!("Bearer {access_token}"));
         let mut response = self
@@ -174,6 +201,14 @@ impl HardenedGitHubOauthClient {
         }
         let bytes = read_bounded(&mut response, GITHUB_CATALOG_PAGE_BYTES)?;
         serde_json::from_slice(&bytes).map_err(|_| HumanOidcError::InvalidTokenResponse)
+    }
+
+    fn catalog_page<T: DeserializeOwned>(
+        &self,
+        path_and_query: &str,
+        access_token: &str,
+    ) -> Result<Vec<T>, HumanOidcError> {
+        self.catalog_response(path_and_query, access_token)
     }
 
     fn repository_catalog(
@@ -369,6 +404,45 @@ impl GitHubOauthAdapter for HardenedGitHubOauthClient {
         Ok(organizations.into_keys().collect())
     }
 
+    fn authorized_installations(
+        &self,
+        access_token: &str,
+    ) -> Result<Vec<GitHubUserInstallation>, HumanOidcError> {
+        let mut installations = BTreeMap::<u64, GitHubUserInstallation>::new();
+        for page in 1..=GITHUB_CATALOG_MAX_PAGES {
+            let response = self.catalog_response::<GitHubInstallationPageResponse>(
+                &format!("/user/installations?per_page={GITHUB_CATALOG_PAGE_SIZE}&page={page}"),
+                access_token,
+            )?;
+            let full_page = response.installations.len() == GITHUB_CATALOG_PAGE_SIZE;
+            for installation in response.installations {
+                if installation.suspended_at.is_some() {
+                    continue;
+                }
+                if installation.id == 0
+                    || installation.account.id == 0
+                    || installation.account.login.is_empty()
+                    || installation.account.login.len() > 255
+                    || installation.account.login.chars().any(char::is_control)
+                {
+                    return Err(HumanOidcError::InvalidTokenResponse);
+                }
+                installations.insert(
+                    installation.id,
+                    GitHubUserInstallation {
+                        installation_id: installation.id,
+                        account_id: installation.account.id,
+                        account_login: installation.account.login,
+                    },
+                );
+            }
+            if !full_page {
+                break;
+            }
+        }
+        Ok(installations.into_values().collect())
+    }
+
     fn authorized_repositories(
         &self,
         access_token: &str,
@@ -412,5 +486,21 @@ mod tests {
             serde_json::from_value(serde_json::json!({"organization": {"login": "runtrue"}}))
                 .unwrap();
         assert_eq!(membership.organization.login, "runtrue");
+    }
+
+    #[test]
+    fn installation_catalog_shape_tracks_active_app_accounts() {
+        let page: GitHubInstallationPageResponse = serde_json::from_value(serde_json::json!({
+            "total_count": 2,
+            "installations": [
+                {"id": 42417, "account": {"id": 431, "login": "AgentOps"}, "suspended_at": null},
+                {"id": 42418, "account": {"id": 432, "login": "Paused"}, "suspended_at": "2026-08-03T00:00:00Z"}
+            ]
+        }))
+        .unwrap();
+        assert_eq!(page.installations.len(), 2);
+        assert_eq!(page.installations[0].account.login, "AgentOps");
+        assert!(page.installations[0].suspended_at.is_none());
+        assert!(page.installations[1].suspended_at.is_some());
     }
 }

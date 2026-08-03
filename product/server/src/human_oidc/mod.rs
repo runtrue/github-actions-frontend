@@ -16,11 +16,11 @@ pub use error::HumanOidcError;
 pub use github::{GitHubOauthAdapter, HardenedGitHubOauthClient};
 pub use metrics::{HumanAuthMetrics, HumanAuthMetricsSnapshot};
 pub use model::{
-    validate_human_oidc_public_origin, GitHubAccessToken, GitHubUserCatalog, GitHubUserRepository,
-    HumanOidcLimits, VerifiedGitHubIdentity, VerifiedHumanIdentity, ID_TOKEN_CLOCK_SKEW_SECONDS,
-    MAX_AUTHORIZATION_CODE_BYTES, MAX_HUMAN_JWKS_BYTES, MAX_HUMAN_JWKS_KEYS, MAX_ID_TOKEN_BYTES,
-    MAX_ID_TOKEN_LIFETIME_SECONDS, MAX_OIDC_RESPONSE_HEADER_BYTES, MAX_SEALED_COOKIE_BYTES,
-    MAX_TOKEN_RESPONSE_BYTES,
+    validate_human_oidc_public_origin, GitHubAccessToken, GitHubUserCatalog,
+    GitHubUserInstallation, GitHubUserRepository, HumanOidcLimits, VerifiedGitHubIdentity,
+    VerifiedHumanIdentity, ID_TOKEN_CLOCK_SKEW_SECONDS, MAX_AUTHORIZATION_CODE_BYTES,
+    MAX_HUMAN_JWKS_BYTES, MAX_HUMAN_JWKS_KEYS, MAX_ID_TOKEN_BYTES, MAX_ID_TOKEN_LIFETIME_SECONDS,
+    MAX_OIDC_RESPONSE_HEADER_BYTES, MAX_SEALED_COOKIE_BYTES, MAX_TOKEN_RESPONSE_BYTES,
 };
 pub(crate) use network::encode_query_component;
 

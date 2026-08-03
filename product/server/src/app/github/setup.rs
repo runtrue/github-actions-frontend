@@ -236,11 +236,15 @@ pub(in crate::app) async fn finish_github_installation(
             GitHubCatalogLoad::Ready {
                 viewer_login,
                 catalog,
+                installations,
             } => {
                 viewer_login.eq_ignore_ascii_case(&snapshot.account.login)
                     || catalog.organizations.iter().any(|organization| {
                         organization.eq_ignore_ascii_case(&snapshot.account.login)
                     })
+                    || installations
+                        .iter()
+                        .any(|installation| installation.account_id == snapshot.account.id)
             }
             GitHubCatalogLoad::ReauthenticationRequired | GitHubCatalogLoad::Unavailable => false,
         };

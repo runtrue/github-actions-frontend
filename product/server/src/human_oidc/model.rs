@@ -112,6 +112,13 @@ pub struct GitHubUserRepository {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitHubUserInstallation {
+    pub installation_id: u64,
+    pub account_id: u64,
+    pub account_login: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitHubUserCatalog {
     pub organizations: Vec<String>,
     pub repositories: Vec<GitHubUserRepository>,
