@@ -29,9 +29,10 @@ pub use github_install_ui::{
     RepositoryVisibility, GITHUB_BROWSER_API_CACHE_CONTROL,
 };
 pub use human_oidc::{
-    GitHubAccessToken, GitHubOauthAdapter, GitHubUserCatalog, GitHubUserRepository,
-    HardenedGitHubOauthClient, HardenedHumanOidcClient, HumanAuthMetricsSnapshot, HumanOidcAdapter,
-    HumanOidcError, HumanOidcLimits, VerifiedGitHubIdentity, VerifiedHumanIdentity,
+    GitHubAccessToken, GitHubOauthAdapter, GitHubUserCatalog, GitHubUserInstallation,
+    GitHubUserRepository, HardenedGitHubOauthClient, HardenedHumanOidcClient,
+    HumanAuthMetricsSnapshot, HumanOidcAdapter, HumanOidcError, HumanOidcLimits,
+    VerifiedGitHubIdentity, VerifiedHumanIdentity,
 };
 pub use repository_action_builder::UnixRepositoryActionBuilder;
 pub use runner_certificates::{

@@ -17,7 +17,7 @@ use crate::github_install_ui::{
     GitHubUiAlert, RepositoryLinkState, RepositorySelection, RepositoryVisibility,
     GITHUB_BROWSER_API_CACHE_CONTROL,
 };
-use crate::human_oidc::{GitHubUserCatalog, HumanOidcError};
+use crate::human_oidc::{GitHubUserCatalog, GitHubUserInstallation, HumanOidcError};
 use axum::body::Bytes;
 use axum::extract::rejection::BytesRejection;
 use axum::extract::{Extension, Path, Query, State};
@@ -1571,6 +1571,7 @@ pub(super) enum GitHubCatalogLoad {
     Ready {
         viewer_login: String,
         catalog: GitHubUserCatalog,
+        installations: Vec<GitHubUserInstallation>,
     },
     ReauthenticationRequired,
     Unavailable,
@@ -1599,13 +1600,18 @@ pub(super) async fn github_catalog_for_browser_session(
     let viewer_login = credential.login.clone();
     match tokio::task::spawn_blocking(move || {
         let _permit = permit;
-        adapter.authorized_catalog(&credential.access_token)
+        let catalog = adapter.authorized_catalog(&credential.access_token)?;
+        let installations = adapter
+            .authorized_installations(&credential.access_token)
+            .unwrap_or_default();
+        Ok::<_, HumanOidcError>((catalog, installations))
     })
     .await
     {
-        Ok(Ok(catalog)) => GitHubCatalogLoad::Ready {
+        Ok(Ok((catalog, installations))) => GitHubCatalogLoad::Ready {
             viewer_login,
             catalog,
+            installations,
         },
         Ok(Err(HumanOidcError::ProviderApiRejected)) => GitHubCatalogLoad::ReauthenticationRequired,
         _ => GitHubCatalogLoad::Unavailable,
@@ -1635,16 +1641,21 @@ async fn github_organizations_for_browser_session(
     let viewer_login = credential.login.clone();
     match tokio::task::spawn_blocking(move || {
         let _permit = permit;
-        adapter.authorized_organizations(&credential.access_token)
+        let organizations = adapter.authorized_organizations(&credential.access_token)?;
+        let installations = adapter
+            .authorized_installations(&credential.access_token)
+            .unwrap_or_default();
+        Ok::<_, HumanOidcError>((organizations, installations))
     })
     .await
     {
-        Ok(Ok(organizations)) => GitHubCatalogLoad::Ready {
+        Ok(Ok((organizations, installations))) => GitHubCatalogLoad::Ready {
             viewer_login,
             catalog: GitHubUserCatalog {
                 organizations,
                 repositories: Vec::new(),
             },
+            installations,
         },
         Ok(Err(HumanOidcError::ProviderApiRejected)) => GitHubCatalogLoad::ReauthenticationRequired,
         _ => GitHubCatalogLoad::Unavailable,
@@ -1676,20 +1687,25 @@ async fn github_repositories_for_browser_session(
     let selected_organization = organization.to_owned();
     match tokio::task::spawn_blocking(move || {
         let _permit = permit;
-        adapter.authorized_repositories(
+        let repositories = adapter.authorized_repositories(
             &credential.access_token,
             &selected_organization,
             &credential.login,
-        )
+        )?;
+        let installations = adapter
+            .authorized_installations(&credential.access_token)
+            .unwrap_or_default();
+        Ok::<_, HumanOidcError>((repositories, installations))
     })
     .await
     {
-        Ok(Ok(repositories)) => GitHubCatalogLoad::Ready {
+        Ok(Ok((repositories, installations))) => GitHubCatalogLoad::Ready {
             viewer_login,
             catalog: GitHubUserCatalog {
                 organizations: vec![organization.to_owned()],
                 repositories,
             },
+            installations,
         },
         Ok(Err(HumanOidcError::ProviderApiRejected)) => GitHubCatalogLoad::ReauthenticationRequired,
         _ => GitHubCatalogLoad::Unavailable,
@@ -1713,6 +1729,7 @@ fn github_user_organization_catalog(
     viewer_login: &str,
     catalog: &GitHubUserCatalog,
     page: &GitHubInstallationsPage,
+    user_installations: &[GitHubUserInstallation],
 ) -> Value {
     let candidates = page
         .repository_candidates
@@ -1731,6 +1748,10 @@ fn github_user_organization_catalog(
         .filter(|installation| installation.state == UiGitHubInstallationState::Active)
         .map(|installation| installation.account_login.to_ascii_lowercase())
         .collect::<std::collections::BTreeSet<_>>();
+    let user_installation_account_ids = user_installations
+        .iter()
+        .map(|installation| installation.account_id)
+        .collect::<std::collections::BTreeSet<_>>();
     let mut organizations = BTreeMap::<String, (String, BTreeMap<String, Value>)>::new();
     organizations
         .entry(viewer_login.to_ascii_lowercase())
@@ -1740,6 +1761,11 @@ fn github_user_organization_catalog(
         .iter()
         .filter(|installation| installation.state == UiGitHubInstallationState::Active)
     {
+        organizations
+            .entry(installation.account_login.to_ascii_lowercase())
+            .or_insert_with(|| (installation.account_login.clone(), BTreeMap::new()));
+    }
+    for installation in user_installations {
         organizations
             .entry(installation.account_login.to_ascii_lowercase())
             .or_insert_with(|| (installation.account_login.clone(), BTreeMap::new()));
@@ -1782,7 +1808,9 @@ fn github_user_organization_catalog(
             "added"
         } else if candidate.is_some() {
             "available"
-        } else if active_installation_accounts.contains(&repository.owner.to_ascii_lowercase()) {
+        } else if active_installation_accounts.contains(&repository.owner.to_ascii_lowercase())
+            || user_installation_account_ids.contains(&repository.owner_id)
+        {
             "existing_installation"
         } else {
             "needs_installation"
@@ -2063,9 +2091,14 @@ pub(in crate::app) async fn github_browser_state(
             GitHubCatalogLoad::Ready {
                 viewer_login,
                 catalog,
+                installations,
             } => {
-                payload["organizations"] =
-                    github_user_organization_catalog(&viewer_login, &catalog, &page);
+                payload["organizations"] = github_user_organization_catalog(
+                    &viewer_login,
+                    &catalog,
+                    &page,
+                    &installations,
+                );
                 payload["userCatalog"] = json!({"status": "ready"});
             }
             GitHubCatalogLoad::ReauthenticationRequired => {
@@ -3687,7 +3720,7 @@ mod user_catalog_tests {
                 .collect(),
         };
 
-        let organizations = github_user_organization_catalog("ada", &catalog, &page);
+        let organizations = github_user_organization_catalog("ada", &catalog, &page, &[]);
         let octo = organizations
             .as_array()
             .unwrap()
@@ -3713,6 +3746,60 @@ mod user_catalog_tests {
             .unwrap()
             .iter()
             .any(|organization| organization["name"] == "ada"));
+    }
+
+    #[test]
+    fn signed_in_user_catalog_recognizes_an_app_installation_absent_from_local_state() {
+        let page = GitHubInstallationsPage {
+            tenant_name: "Forge".to_owned(),
+            principal_name: "Ada".to_owned(),
+            session_csrf_token: "session-csrf".to_owned(),
+            app: GitHubAppHealth {
+                app_id: Some(42),
+                app_slug: Some("runtrue-ci".to_owned()),
+                provider_host: "github.example".to_owned(),
+                app: ComponentHealth::Ready,
+                signer: ComponentHealth::Ready,
+                webhook: ComponentHealth::Ready,
+                callback: ComponentHealth::Ready,
+            },
+            installations: Vec::new(),
+            repositories: Vec::new(),
+            repository_candidates: Vec::new(),
+            events: Vec::new(),
+            alert: None,
+            install_action: None,
+        };
+        let catalog = GitHubUserCatalog {
+            organizations: vec!["agentops".to_owned()],
+            repositories: vec![GitHubUserRepository {
+                repository_id: 2_042_673,
+                owner_id: 431,
+                owner: "agentops".to_owned(),
+                name: "agentops-service".to_owned(),
+                visibility: "private".to_owned(),
+                default_branch: "main".to_owned(),
+            }],
+        };
+        let user_installations = vec![GitHubUserInstallation {
+            installation_id: 42_417,
+            account_id: 431,
+            account_login: "AgentOps".to_owned(),
+        }];
+
+        let organizations =
+            github_user_organization_catalog("ada", &catalog, &page, &user_installations);
+        let agentops = organizations
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|organization| organization["name"] == "AgentOps")
+            .unwrap();
+        assert_eq!(agentops["repositories"][0]["name"], "agentops-service");
+        assert_eq!(
+            agentops["repositories"][0]["state"],
+            "existing_installation"
+        );
     }
 
     #[test]
@@ -3757,7 +3844,7 @@ mod user_catalog_tests {
             repositories: Vec::new(),
         };
 
-        let organizations = github_user_organization_catalog("ada", &oauth_catalog, &page);
+        let organizations = github_user_organization_catalog("ada", &oauth_catalog, &page, &[]);
         let organizations = organizations.as_array().unwrap();
         let agentops = organizations
             .iter()
