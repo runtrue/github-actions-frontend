@@ -114,7 +114,6 @@ fn run(args: Args, configuration: Configuration) -> Result<(), String> {
         configuration.runtime_uid,
         configuration.runtime_gid,
     )?;
-    restart_runner(&configuration)?;
     Ok(())
 }
 
@@ -323,20 +322,6 @@ fn write_manifest(
     .map_err(|_| "cannot assign OCI admission manifest ownership")?;
     fs::rename(&pending, path).map_err(|_| "cannot publish OCI admission manifest")?;
     Ok(())
-}
-
-fn restart_runner(configuration: &Configuration) -> Result<(), String> {
-    let status = Command::new(&configuration.docker)
-        .args(["restart", "--time", "30", &configuration.runner_container])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::inherit())
-        .status()
-        .map_err(|_| "cannot restart OCI runner after admission")?;
-    status
-        .success()
-        .then_some(())
-        .ok_or_else(|| "OCI runner restart failed".to_owned())
 }
 
 fn image_digest(image: &str) -> Result<ContentDigest, String> {
