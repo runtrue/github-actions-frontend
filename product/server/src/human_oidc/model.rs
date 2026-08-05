@@ -114,6 +114,8 @@ pub struct GitHubUserRepository {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitHubUserInstallation {
     pub installation_id: u64,
+    pub app_id: u64,
+    pub app_slug: Option<String>,
     pub account_id: u64,
     pub account_login: String,
 }

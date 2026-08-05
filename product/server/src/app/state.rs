@@ -3,7 +3,8 @@ use crate::app::{
     GITHUB_LIFECYCLE_LEASE_MS, GITHUB_SETUP_MAX_CONCURRENCY, MAX_BOOTSTRAP_TOKEN_BYTES,
 };
 use crate::human_oidc::{
-    CookieSealer, GitHubOauthAdapter, HumanAuthMetrics, HumanOidcAdapter, HumanOidcError,
+    CookieSealer, GitHubOauthAdapter, GitHubUserInstallation, GitHubUserRepository,
+    HumanAuthMetrics, HumanOidcAdapter, HumanOidcError,
 };
 use crate::runner_certificates::RunnerCertificateAuthority;
 use crate::runner_service::{
@@ -25,8 +26,8 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use thiserror::Error;
 use zeroize::Zeroizing;
 /// Constant-time verifier which never retains the configured bearer token.
@@ -93,6 +94,170 @@ pub(in crate::app) struct GitHubOauthState {
     pub(in crate::app) authorization_endpoint: String,
     pub(in crate::app) adapter: Arc<dyn GitHubOauthAdapter>,
     pub(in crate::app) allowed_roles: BTreeMap<u64, String>,
+    pub(in crate::app) catalog_cache: Arc<GitHubCatalogCache>,
+}
+
+const GITHUB_CATALOG_CACHE_TTL: Duration = Duration::from_secs(30);
+const GITHUB_CATALOG_CACHE_MAX_SESSIONS: usize = 256;
+const GITHUB_CATALOG_CACHE_MAX_REPOSITORIES: usize = 1_024;
+
+#[derive(Clone)]
+struct GitHubCatalogCacheEntry<T> {
+    expires_at: Instant,
+    value: T,
+}
+
+type GitHubOrganizationCache = BTreeMap<String, GitHubCatalogCacheEntry<Vec<String>>>;
+type GitHubInstallationCache =
+    BTreeMap<String, GitHubCatalogCacheEntry<Vec<GitHubUserInstallation>>>;
+type GitHubRepositoryCache =
+    BTreeMap<(String, String), GitHubCatalogCacheEntry<Vec<GitHubUserRepository>>>;
+
+#[derive(Default)]
+pub(in crate::app) struct GitHubCatalogCache {
+    organizations: Mutex<GitHubOrganizationCache>,
+    installations: Mutex<GitHubInstallationCache>,
+    repositories: Mutex<GitHubRepositoryCache>,
+}
+
+impl GitHubCatalogCache {
+    fn cached<K: Ord, T: Clone>(
+        entries: &mut BTreeMap<K, GitHubCatalogCacheEntry<T>>,
+        key: &K,
+        now: Instant,
+    ) -> Option<T> {
+        entries
+            .get(key)
+            .filter(|entry| entry.expires_at > now)
+            .map(|entry| entry.value.clone())
+    }
+
+    fn insert<K: Ord + Clone, T>(
+        entries: &mut BTreeMap<K, GitHubCatalogCacheEntry<T>>,
+        key: K,
+        value: T,
+        maximum: usize,
+        now: Instant,
+    ) {
+        entries.retain(|_, entry| entry.expires_at > now);
+        if entries.len() >= maximum && !entries.contains_key(&key) {
+            if let Some(oldest_key) = entries
+                .iter()
+                .min_by_key(|(_, entry)| entry.expires_at)
+                .map(|(key, _)| key.clone())
+            {
+                entries.remove(&oldest_key);
+            }
+        }
+        entries.insert(
+            key,
+            GitHubCatalogCacheEntry {
+                expires_at: now + GITHUB_CATALOG_CACHE_TTL,
+                value,
+            },
+        );
+    }
+
+    pub(in crate::app) fn organizations(&self, session_id: &str) -> Option<Vec<String>> {
+        let mut entries = self.organizations.lock().ok()?;
+        Self::cached(&mut entries, &session_id.to_owned(), Instant::now())
+    }
+
+    pub(in crate::app) fn put_organizations(&self, session_id: &str, value: Vec<String>) {
+        if let Ok(mut entries) = self.organizations.lock() {
+            Self::insert(
+                &mut entries,
+                session_id.to_owned(),
+                value,
+                GITHUB_CATALOG_CACHE_MAX_SESSIONS,
+                Instant::now(),
+            );
+        }
+    }
+
+    pub(in crate::app) fn installations(
+        &self,
+        session_id: &str,
+    ) -> Option<Vec<GitHubUserInstallation>> {
+        let mut entries = self.installations.lock().ok()?;
+        Self::cached(&mut entries, &session_id.to_owned(), Instant::now())
+    }
+
+    pub(in crate::app) fn put_installations(
+        &self,
+        session_id: &str,
+        value: Vec<GitHubUserInstallation>,
+    ) {
+        if let Ok(mut entries) = self.installations.lock() {
+            Self::insert(
+                &mut entries,
+                session_id.to_owned(),
+                value,
+                GITHUB_CATALOG_CACHE_MAX_SESSIONS,
+                Instant::now(),
+            );
+        }
+    }
+
+    pub(in crate::app) fn repositories(
+        &self,
+        session_id: &str,
+        organization: &str,
+    ) -> Option<Vec<GitHubUserRepository>> {
+        let mut entries = self.repositories.lock().ok()?;
+        Self::cached(
+            &mut entries,
+            &(session_id.to_owned(), organization.to_ascii_lowercase()),
+            Instant::now(),
+        )
+    }
+
+    pub(in crate::app) fn put_repositories(
+        &self,
+        session_id: &str,
+        organization: &str,
+        value: Vec<GitHubUserRepository>,
+    ) {
+        if let Ok(mut entries) = self.repositories.lock() {
+            Self::insert(
+                &mut entries,
+                (session_id.to_owned(), organization.to_ascii_lowercase()),
+                value,
+                GITHUB_CATALOG_CACHE_MAX_REPOSITORIES,
+                Instant::now(),
+            );
+        }
+    }
+
+    pub(in crate::app) fn invalidate_session(&self, session_id: &str) {
+        if let Ok(mut entries) = self.organizations.lock() {
+            entries.remove(session_id);
+        }
+        if let Ok(mut entries) = self.installations.lock() {
+            entries.remove(session_id);
+        }
+        if let Ok(mut entries) = self.repositories.lock() {
+            entries.retain(|(cached_session, _), _| cached_session != session_id);
+        }
+    }
+
+    pub(in crate::app) fn invalidate_repository(&self, session_id: &str, organization: &str) {
+        if let Ok(mut entries) = self.repositories.lock() {
+            entries.remove(&(session_id.to_owned(), organization.to_ascii_lowercase()));
+        }
+    }
+
+    pub(in crate::app) fn invalidate_all(&self) {
+        if let Ok(mut entries) = self.organizations.lock() {
+            entries.clear();
+        }
+        if let Ok(mut entries) = self.installations.lock() {
+            entries.clear();
+        }
+        if let Ok(mut entries) = self.repositories.lock() {
+            entries.clear();
+        }
+    }
 }
 
 pub struct GitHubOauthQuickstartConfig {
@@ -405,6 +570,7 @@ impl AppState {
             authorization_endpoint,
             adapter: config.adapter,
             allowed_roles: config.allowed_roles,
+            catalog_cache: Arc::new(GitHubCatalogCache::default()),
         });
         Ok(self)
     }
@@ -451,6 +617,17 @@ impl AppState {
         self.github_installation
             .as_ref()
             .map(|github| github.metrics.snapshot())
+    }
+
+    pub(in crate::app) fn invalidate_github_catalog_cache(&self) {
+        if let Some(cache) = self
+            .human_oidc
+            .as_ref()
+            .and_then(|human| human.github_oauth.as_ref())
+            .map(|github| &github.catalog_cache)
+        {
+            cache.invalidate_all();
+        }
     }
 
     /// Reconcile at most one durable, signature-verified GitHub installation

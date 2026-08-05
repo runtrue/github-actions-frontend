@@ -277,6 +277,7 @@ pub(in crate::app) async fn finish_github_installation(
     if let Err(error) = provision_selected_github_repositories(&state, &reconciliation).await {
         return github_callback_response(control_plane_problem(&request_id, error));
     }
+    state.invalidate_github_catalog_cache();
     github
         .metrics
         .callbacks_completed

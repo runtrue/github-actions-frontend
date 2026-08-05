@@ -1545,15 +1545,21 @@
     reloadButton.textContent = state.data.userCatalog?.status === "reauthentication_required" ? "Refresh GitHub sign-in" : "Reload GitHub data";
   }
 
-  async function loadOrganizationRepositories(organizationId) {
+  async function loadOrganizationRepositories(organizationId, { force = false } = {}) {
     const organization = state.data.organizations.find((item) => item.id === organizationId);
     if (!organization) return;
+    if (!force && organization.repositoriesStatus === "ready") {
+      renderOrganizations(); renderRepositoryChoices(); updateSelection(); updateGitHubDialogActions();
+      return;
+    }
     const requestId = ++state.repositoryRequestId;
     organization.repositories = [];
     organization.repositoriesStatus = "loading";
     renderOrganizations(); renderRepositoryChoices(); updateGitHubDialogActions();
     try {
-      const response = await fetch(`/api/v1/ui/github?catalog=true&organization=${encodeURIComponent(organization.name)}`, { credentials: "same-origin", headers: { accept: "application/json" }, cache: "no-store" });
+      const query = new URLSearchParams({ organization: organization.name });
+      if (force) query.set("refresh", "true");
+      const response = await fetch(`/api/v1/ui/github/catalog/repositories?${query}`, { credentials: "same-origin", headers: { accept: "application/json" }, cache: "no-store" });
       if (response.status === 401) { byId("add-repo-dialog").close(); return showLogin(); }
       if (!response.ok) throw new Error(`GitHub repositories failed (${response.status})`);
       const catalog = await response.json();
@@ -1594,8 +1600,14 @@
     renderRepositoryChoices(); updateSelection();
   }
 
-  async function loadOrganizations({ preserveSelection = false, reloadSelected = false } = {}) {
+  async function loadOrganizations({ preserveSelection = false, reloadSelected = false, force = false } = {}) {
     const selectedOrganization = preserveSelection ? state.activeOrganization : null;
+    if (!force && state.data.userCatalog?.status === "ready" && state.data.organizations.length) {
+      if (selectedOrganization && state.data.organizations.some((organization) => organization.id === selectedOrganization)) state.activeOrganization = selectedOrganization;
+      renderOrganizations(); renderRepositoryChoices(); updateSelection(); updateGitHubDialogActions();
+      if (reloadSelected && state.activeOrganization) await loadOrganizationRepositories(state.activeOrganization);
+      return;
+    }
     const requestId = ++state.organizationRequestId;
     state.repositoryRequestId += 1;
     state.data.organizations = [];
@@ -1604,7 +1616,7 @@
     state.selectedRepositories.clear();
     renderOrganizations(); renderRepositoryChoices(); updateSelection(); updateGitHubDialogActions();
     try {
-      const response = await fetch("/api/v1/ui/github?catalog=true", { credentials: "same-origin", headers: { accept: "application/json" }, cache: "no-store" });
+      const response = await fetch(`/api/v1/ui/github/catalog/organizations${force ? "?refresh=true" : ""}`, { credentials: "same-origin", headers: { accept: "application/json" }, cache: "no-store" });
       if (response.status === 401) { byId("add-repo-dialog").close(); return showLogin(); }
       if (!response.ok) throw new Error(`GitHub organizations failed (${response.status})`);
       const catalog = await response.json();
@@ -1620,17 +1632,24 @@
       showToast(error.message || "Could not load GitHub organizations.");
     }
     renderOrganizations(); renderRepositoryChoices(); updateSelection(); updateGitHubDialogActions();
-    if (reloadSelected && state.activeOrganization) await loadOrganizationRepositories(state.activeOrganization);
+    if (reloadSelected && state.activeOrganization) await loadOrganizationRepositories(state.activeOrganization, { force });
+    else if (!state.activeOrganization && state.data.organizations.length === 1) {
+      state.activeOrganization = state.data.organizations[0].id;
+      await loadOrganizationRepositories(state.activeOrganization);
+    }
   }
 
   async function openAddDialog() {
     state.selectedRepositories.clear(); byId("org-search").value = ""; byId("repo-search").value = "";
-    state.activeOrganization = null;
-    state.data.organizations = [];
-    state.data.userCatalog = { status: "loading" };
+    const hasCatalog = state.data.userCatalog?.status === "ready" && state.data.organizations.length > 0;
+    if (!hasCatalog) {
+      state.activeOrganization = null;
+      state.data.organizations = [];
+      state.data.userCatalog = { status: "loading" };
+    }
     renderOrganizations(); renderRepositoryChoices(); updateSelection(); byId("add-repo-dialog").showModal();
     updateGitHubDialogActions();
-    await loadOrganizations();
+    await loadOrganizations({ preserveSelection: hasCatalog });
   }
 
   function submitLocalForm(path, fields) {
@@ -1660,7 +1679,7 @@
 
   async function reloadGitHubData() {
     if (state.data.userCatalog?.status === "reauthentication_required") return refreshGitHubAccess();
-    await loadOrganizations({ preserveSelection: true, reloadSelected: true });
+    await loadOrganizations({ preserveSelection: true, reloadSelected: true, force: true });
   }
 
   async function refreshRepositoryRuns() {
