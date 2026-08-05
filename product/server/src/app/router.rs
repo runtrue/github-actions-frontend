@@ -21,15 +21,16 @@ use crate::app::{
     get_run_logs, get_runner, get_runner_capsule_trust_key, get_runner_fleet, get_runner_pool,
     get_secret_metadata, get_team, get_user, get_variable, get_workflow_frontend_report,
     github_app_status, github_browser_state, github_webhook, health,
-    link_github_repository_from_ui, list_api_tokens, list_approvals, list_audit_events,
-    list_repositories, list_repository_access, list_runner_pools, list_runners, list_runs,
-    list_secret_metadata, list_team_members, list_teams, list_users, logout_browser_session,
-    oidc_discovery, oidc_jwks, plan_runner_replacement, promote_artifact, promote_cache,
-    put_repository_access, put_runner_slot, put_runner_update_policy, put_runner_update_release,
-    put_variable, readiness, refresh_browser_session, remove_team_member, replay_event,
-    request_context, require_bearer, require_writable_control_plane, require_writable_human_auth,
-    revoke_api_token, revoke_github_installation, revoke_repository_access, rotate_secret,
-    route_not_found, save_browser_configuration_project, save_browser_organization_secret,
+    import_github_installation_from_ui, link_github_repository_from_ui, list_api_tokens,
+    list_approvals, list_audit_events, list_repositories, list_repository_access,
+    list_runner_pools, list_runners, list_runs, list_secret_metadata, list_team_members,
+    list_teams, list_users, logout_browser_session, oidc_discovery, oidc_jwks,
+    plan_runner_replacement, promote_artifact, promote_cache, put_repository_access,
+    put_runner_slot, put_runner_update_policy, put_runner_update_release, put_variable, readiness,
+    refresh_browser_session, remove_team_member, replay_event, request_context, require_bearer,
+    require_writable_control_plane, require_writable_human_auth, revoke_api_token,
+    revoke_github_installation, revoke_repository_access, rotate_secret, route_not_found,
+    save_browser_configuration_project, save_browser_organization_secret,
     save_browser_organization_variable, save_browser_repository_secret,
     save_browser_repository_variable, save_browser_repository_workflow_directory,
     save_browser_scoped_secret, start_github_installation_from_ui, sync_github_installation,
@@ -250,6 +251,10 @@ pub fn router(state: AppState) -> Router {
             .route(
                 "/github/installations/start",
                 post(start_github_installation_from_ui),
+            )
+            .route(
+                "/github/installations/import",
+                post(import_github_installation_from_ui),
             )
             .route(
                 "/ui/github/repositories/link",

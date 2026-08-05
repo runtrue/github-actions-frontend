@@ -50,12 +50,10 @@ async fn github_browser_imports_an_existing_app_installation_without_starting_se
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/github/installations/start")
+                .uri("/github/installations/import")
                 .header("cookie", &cookies)
                 .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
-                .body(Body::from(format!(
-                    "csrf_token={csrf}&idempotency_key=import-existing&repository_ids=77&import_only=true"
-                )))
+                .body(Body::from(format!("csrf_token={csrf}&repository_ids=77")))
                 .unwrap(),
         )
         .await
@@ -67,6 +65,23 @@ async fn github_browser_imports_an_existing_app_installation_without_starting_se
         .github_repository_for_event("9001", "77", "octo", "runtrue")
         .unwrap();
     assert_eq!(installation.external_id, "9001");
+
+    let unavailable = application
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/github/installations/import")
+                .header("cookie", &cookies)
+                .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from(format!("csrf_token={csrf}&repository_ids=78")))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(unavailable.status(), StatusCode::CONFLICT);
+    assert!(!unavailable.headers().contains_key(LOCATION));
+    assert_eq!(provider.calls.load(Ordering::Relaxed), 2);
 }
 
 #[tokio::test]

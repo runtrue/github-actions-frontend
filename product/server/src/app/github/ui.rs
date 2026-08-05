@@ -3159,6 +3159,25 @@ pub(in crate::app) async fn start_github_installation_from_ui(
     headers: HeaderMap,
     body: Result<Bytes, BytesRejection>,
 ) -> Response {
+    manage_github_installation_from_ui(state, request_id, headers, body, false).await
+}
+
+pub(in crate::app) async fn import_github_installation_from_ui(
+    State(state): State<AppState>,
+    Extension(request_id): Extension<RequestId>,
+    headers: HeaderMap,
+    body: Result<Bytes, BytesRejection>,
+) -> Response {
+    manage_github_installation_from_ui(state, request_id, headers, body, true).await
+}
+
+async fn manage_github_installation_from_ui(
+    state: AppState,
+    request_id: RequestId,
+    headers: HeaderMap,
+    body: Result<Bytes, BytesRejection>,
+    import_only: bool,
+) -> Response {
     let body = match body {
         Ok(body) => body,
         Err(_) => return invalid_object_problem(&request_id, "invalid GitHub setup form"),
@@ -3166,15 +3185,6 @@ pub(in crate::app) async fn start_github_installation_from_ui(
     let presented_csrf = match browser_csrf_input(&request_id, &headers, Ok(body.clone())) {
         Ok(token) => token,
         Err(response) => return *response,
-    };
-    let idempotency_key = match form_value(&body, "idempotency_key") {
-        Ok(Some(value)) if !value.is_empty() => value,
-        _ => return invalid_object_problem(&request_id, "invalid GitHub setup idempotency key"),
-    };
-    let import_only = match form_value(&body, "import_only") {
-        Ok(Some(value)) if value == "true" => true,
-        Ok(None) => false,
-        _ => return invalid_object_problem(&request_id, "invalid GitHub setup action"),
     };
     let now = match now_unix_ms(&request_id) {
         Ok(now) => now,
@@ -3402,6 +3412,10 @@ pub(in crate::app) async fn start_github_installation_from_ui(
             "repository selection is required when importing a GitHub App installation",
         );
     }
+    let idempotency_key = match form_value(&body, "idempotency_key") {
+        Ok(Some(value)) if !value.is_empty() => value,
+        _ => return invalid_object_problem(&request_id, "invalid GitHub setup idempotency key"),
+    };
     let setup = match start_github_setup_service(
         &state,
         &request_id,
