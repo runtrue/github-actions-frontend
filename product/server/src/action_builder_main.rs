@@ -1,4 +1,4 @@
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use runtrue_model::ContentDigest;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -19,10 +19,35 @@ const MAX_REQUEST_BYTES: u64 = 64 * 1024;
 const MAX_METADATA_BYTES: u64 = 256 * 1024;
 const MAX_DOCKERFILE_BYTES: u64 = 1024 * 1024;
 const MAX_OCI_ARCHIVE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
-const BUILD_POLICY_ID: &str = "runtrue.repository-action-build.v2.network-none.pinned-materials";
+const NETWORK_NONE_BUILD_POLICY_ID: &str =
+    "runtrue.repository-action-build.v2.network-none.pinned-materials";
+const NETWORK_DEFAULT_BUILD_POLICY_ID: &str =
+    "runtrue.repository-action-build.v3.network-default.pinned-materials";
 const BUILD_ENVIRONMENT_ID: &str =
-    "runtrue.buildkit.v0.30.0.remote-docker-container.bridge.no-insecure-entitlements";
+    "runtrue.buildkit.v0.26.2.docker-driver.no-insecure-entitlements";
 const MAX_ALLOWED_BASE_IMAGES: usize = 32;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum BuildNetwork {
+    None,
+    Default,
+}
+
+impl BuildNetwork {
+    const fn as_buildx_value(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Default => "default",
+        }
+    }
+
+    const fn policy_id(self) -> &'static str {
+        match self {
+            Self::None => NETWORK_NONE_BUILD_POLICY_ID,
+            Self::Default => NETWORK_DEFAULT_BUILD_POLICY_ID,
+        }
+    }
+}
 
 #[derive(Debug, Parser)]
 #[command(name = "runtrue-action-builder", version)]
@@ -39,6 +64,10 @@ struct Args {
     docker: PathBuf,
     #[arg(long, default_value = "runtrue-actions-builder")]
     buildx_builder: String,
+    /// Build-stage network mode. `none` is the secure default; `default` must
+    /// be selected explicitly for actions whose pinned Dockerfile downloads tools.
+    #[arg(long, value_enum, default_value_t = BuildNetwork::None)]
+    build_network: BuildNetwork,
     /// Exact, compiled build policy. Required so old deployment units fail closed.
     #[arg(long)]
     build_policy_id: String,
@@ -188,15 +217,18 @@ fn handle(args: &Args, stream: &mut UnixStream) -> Result<BuildResponse, String>
                 &archive_path,
                 &request,
                 &material_policy_digest,
+                &args.build_policy_id,
+                &args.build_environment_id,
             )?;
         }
         return Ok(response);
     }
     let tag_digest = ContentDigest::sha256(
         format!(
-            "runtrue.repository-action-build.v2\0{}\0{}\0{}\0{}\0{}\0{}\0{}",
+            "runtrue.repository-action-build.v3\0{}\0{}\0{}\0{}\0{}\0{}\0{}\0{}",
             args.build_policy_id,
             args.build_environment_id,
+            args.build_network.as_buildx_value(),
             material_policy_digest,
             args.image_repository,
             request.reference,
@@ -267,6 +299,8 @@ fn handle(args: &Args, stream: &mut UnixStream) -> Result<BuildResponse, String>
             &archive_path,
             &request,
             &material_policy_digest,
+            &args.build_policy_id,
+            &args.build_environment_id,
         )?;
     }
     let response = BuildResponse {
@@ -294,6 +328,8 @@ fn admit(
     archive: &Path,
     request: &BuildRequest,
     material_policy_digest: &ContentDigest,
+    build_policy_id: &str,
+    build_environment_id: &str,
 ) -> Result<(), String> {
     let status = Command::new(command)
         .args([
@@ -310,9 +346,9 @@ fn admit(
             "--metadata-digest",
             request.metadata_digest.as_str(),
             "--build-policy-id",
-            BUILD_POLICY_ID,
+            build_policy_id,
             "--build-environment-id",
-            BUILD_ENVIRONMENT_ID,
+            build_environment_id,
             "--material-policy-digest",
             material_policy_digest.as_str(),
         ])
@@ -356,7 +392,7 @@ fn validate_args(args: &Args) -> Result<(), String> {
         || args.image_repository.contains(['@', ' ', '\n', '\r', '\t'])
         || args.buildx_builder.is_empty()
         || args.buildx_builder.len() > 128
-        || args.build_policy_id != BUILD_POLICY_ID
+        || args.build_policy_id != args.build_network.policy_id()
         || args.build_environment_id != BUILD_ENVIRONMENT_ID
         || allowed_base_images.is_empty()
         || allowed_base_images.len() > MAX_ALLOWED_BASE_IMAGES
@@ -376,9 +412,10 @@ fn build_cache_id(args: &Args, request: &BuildRequest) -> String {
     let material_policy_digest = material_policy_digest(&normalized_allowed_base_images(args));
     let digest = ContentDigest::sha256(
         format!(
-            "runtrue.repository-action-cache.v2\0{}\0{}\0{}\0{}\0{}",
-            BUILD_POLICY_ID,
+            "runtrue.repository-action-cache.v3\0{}\0{}\0{}\0{}\0{}\0{}",
+            args.build_policy_id,
             BUILD_ENVIRONMENT_ID,
+            args.build_network.as_buildx_value(),
             material_policy_digest,
             args.image_repository,
             request.context_id
@@ -405,11 +442,14 @@ fn buildx_arguments(
         OsString::from("--platform"),
         OsString::from(&request.platform),
         OsString::from("--network"),
-        OsString::from("none"),
+        OsString::from(args.build_network.as_buildx_value()),
         OsString::from("--provenance=false"),
         OsString::from("--sbom=false"),
         OsString::from("--label"),
-        OsString::from(format!("org.runtrue.build-policy.id={BUILD_POLICY_ID}")),
+        OsString::from(format!(
+            "org.runtrue.build-policy.id={}",
+            args.build_policy_id
+        )),
         OsString::from("--label"),
         OsString::from(format!(
             "org.runtrue.build-environment.id={BUILD_ENVIRONMENT_ID}"
@@ -722,7 +762,8 @@ mod tests {
             image_repository: "runtrue.local/repository-actions".to_owned(),
             docker: PathBuf::from("/usr/bin/docker"),
             buildx_builder: "runtrue-actions-builder".to_owned(),
-            build_policy_id: BUILD_POLICY_ID.to_owned(),
+            build_network: BuildNetwork::None,
+            build_policy_id: NETWORK_NONE_BUILD_POLICY_ID.to_owned(),
             build_environment_id: BUILD_ENVIRONMENT_ID.to_owned(),
             allowed_base_image: vec![NODE_BASE.to_owned()],
             admit_command: None,
@@ -812,6 +853,13 @@ mod tests {
         let mut obsolete = args();
         obsolete.build_policy_id = "runtrue.repository-action-build.v1".to_owned();
         assert!(validate_args(&obsolete).is_err());
+
+        let mut networked = args();
+        networked.build_network = BuildNetwork::Default;
+        assert!(validate_args(&networked).is_err());
+        networked.build_policy_id = NETWORK_DEFAULT_BUILD_POLICY_ID.to_owned();
+        assert!(validate_args(&networked).is_ok());
+        assert_ne!(first, build_cache_id(&networked, &request()));
     }
 
     #[test]
@@ -836,7 +884,7 @@ mod tests {
             .iter()
             .any(|argument| argument.contains("network=host")));
         assert!(arguments.iter().any(|argument| {
-            argument == &format!("org.runtrue.build-policy.id={BUILD_POLICY_ID}")
+            argument == &format!("org.runtrue.build-policy.id={NETWORK_NONE_BUILD_POLICY_ID}")
         }));
         assert!(arguments.iter().any(|argument| {
             argument == &format!("org.runtrue.build-environment.id={BUILD_ENVIRONMENT_ID}")

@@ -85,10 +85,50 @@ runs:
         "a".repeat(64)
     );
     let metadata = parse_runtrue_repository_action_metadata(source.as_bytes()).unwrap();
-    assert_eq!(metadata.signature_identity, "release@runtrue.dev");
-    assert_eq!(metadata.wit_world, "runtrue:action/run@1.0.0");
+    assert!(matches!(
+        metadata.program,
+        RuntrueRepositoryActionProgram::Component {
+            signature_identity,
+            wit_world,
+            ..
+        } if signature_identity == "release@runtrue.dev"
+            && wit_world == "runtrue:action/run@1.0.0"
+    ));
     assert_eq!(
         metadata.inputs["config-path"].default_value(),
         Some(".github/backport.yml")
     );
+}
+
+#[test]
+fn accepts_runtrue_docker_action_runtime_requirements() {
+    let source = br#"name: AI review
+description: Review a pull request
+inputs:
+  github-token:
+    description: Scoped provider token
+    required: true
+runs:
+  using: docker
+  image: Dockerfile
+permissions:
+  network:
+    - host: api.example.test
+      port: 443
+  secrets:
+    - name: API_KEY
+      purpose: inference
+      file-env: INPUT_API_KEY_FILE
+"#;
+    let metadata = parse_runtrue_repository_action_metadata(source).unwrap();
+    assert!(matches!(
+        metadata.program,
+        RuntrueRepositoryActionProgram::Container { ref dockerfile, .. }
+            if dockerfile == "Dockerfile"
+    ));
+    assert_eq!(metadata.network[0].host, "api.example.test");
+    assert_eq!(metadata.network[0].port, 443);
+    assert_eq!(metadata.secrets[0].name, "API_KEY");
+    assert_eq!(metadata.secrets[0].purpose, "inference");
+    assert_eq!(metadata.secrets[0].file_env, "INPUT_API_KEY_FILE");
 }

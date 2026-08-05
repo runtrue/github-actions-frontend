@@ -43,8 +43,9 @@ use runtrue_trusted_planner::{
     TrustedPlannerError, DEFAULT_LOCKFILE_PATH,
 };
 use runtrue_workflow_frontend::{
-    ResolvedActionInput, ResolvedProgram, ResolvedProgramRef, ResolvedSourceAction,
-    SourceActionResolutionRequest, WorkflowFrontendOptions, WorkflowSourceFrontend,
+    ResolvedActionInput, ResolvedActionNetworkDestination, ResolvedActionSecret, ResolvedProgram,
+    ResolvedProgramRef, ResolvedSourceAction, SourceActionResolutionRequest,
+    WorkflowFrontendOptions, WorkflowSourceFrontend,
 };
 #[cfg(feature = "github-actions")]
 use runtrue_workflow_frontend::{SourceActionDescriptors, SourceActionProgramDeclaration};
@@ -87,6 +88,10 @@ const GITHUB_INSTALLATION_PAGE_SIZE: usize = 100;
 struct DurableResolvedAction {
     program: DurableResolvedProgram,
     inputs: BTreeMap<String, DurableResolvedInput>,
+    #[serde(default)]
+    network: Vec<DurableResolvedNetworkDestination>,
+    #[serde(default)]
+    secrets: Vec<DurableResolvedSecret>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -110,6 +115,21 @@ enum DurableResolvedProgram {
 struct DurableResolvedInput {
     required: bool,
     default: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DurableResolvedNetworkDestination {
+    host: String,
+    port: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DurableResolvedSecret {
+    name: String,
+    purpose: String,
+    file_env: String,
 }
 
 fn durable_resolved_actions(
@@ -152,9 +172,29 @@ fn durable_resolved_actions(
                     )
                 })
                 .collect();
+            let network = action
+                .network_destinations()
+                .map(|destination| DurableResolvedNetworkDestination {
+                    host: destination.host().to_owned(),
+                    port: destination.port(),
+                })
+                .collect();
+            let secrets = action
+                .secrets()
+                .map(|secret| DurableResolvedSecret {
+                    name: secret.name().to_owned(),
+                    purpose: secret.purpose().to_owned(),
+                    file_env: secret.file_env().to_owned(),
+                })
+                .collect();
             (
                 reference.to_owned(),
-                DurableResolvedAction { program, inputs },
+                DurableResolvedAction {
+                    program,
+                    inputs,
+                    network,
+                    secrets,
+                },
             )
         })
         .collect::<BTreeMap<_, _>>();
@@ -191,6 +231,36 @@ fn restore_resolved_actions(
             resolved.insert_input(name, input).map_err(|_| {
                 TaskFailure::terminal("durable repository-action inputs are invalid")
             })?;
+        }
+        for destination in action.network {
+            resolved
+                .insert_network_destination(
+                    ResolvedActionNetworkDestination::new(destination.host, destination.port)
+                        .map_err(|_| {
+                            TaskFailure::terminal(
+                                "durable repository-action network destination is invalid",
+                            )
+                        })?,
+                )
+                .map_err(|_| {
+                    TaskFailure::terminal(
+                        "durable repository-action network destinations are invalid",
+                    )
+                })?;
+        }
+        for secret in action.secrets {
+            resolved
+                .insert_secret(
+                    ResolvedActionSecret::new(secret.name, secret.purpose, secret.file_env)
+                        .map_err(|_| {
+                            TaskFailure::terminal(
+                                "durable repository-action secret declaration is invalid",
+                            )
+                        })?,
+                )
+                .map_err(|_| {
+                    TaskFailure::terminal("durable repository-action secrets are invalid")
+                })?;
         }
         options
             .insert_resolved_action(reference, resolved)
@@ -1418,6 +1488,16 @@ impl RepositoryActionResolver for GitHubRepositoryActionResolver {
         for (name, input) in declaration.inputs() {
             action
                 .insert_input(name, input.clone())
+                .map_err(|_| RepositoryActionResolveError::Rejected)?;
+        }
+        for destination in declaration.network_destinations() {
+            action
+                .insert_network_destination(destination.clone())
+                .map_err(|_| RepositoryActionResolveError::Rejected)?;
+        }
+        for secret in declaration.secrets() {
+            action
+                .insert_secret(secret.clone())
                 .map_err(|_| RepositoryActionResolveError::Rejected)?;
         }
         Ok(PreparedRepositoryAction {
