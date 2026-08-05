@@ -1681,6 +1681,63 @@ async fn browser_retry_queues_a_new_verified_scm_event_idempotently() {
 }
 
 #[tokio::test]
+async fn github_webhook_acknowledges_unimported_repositories_without_enqueuing_work() {
+    let (control_plane, application) = application(Some(WEBHOOK_SECRET));
+    let body = serde_json::to_vec(&json!({
+        "action": "created",
+        "installation": {"id": 9001},
+        "issue": {
+            "number": 13,
+            "url": "https://github.ibm.com/api/v3/repos/ci/test-dev/issues/13",
+            "repository_url": "https://github.ibm.com/api/v3/repos/ci/test-dev"
+        },
+        "comment": {"id": 99, "body": "run the workflow"},
+        "repository": {
+            "id": 2090679,
+            "owner": {"login": "ci"},
+            "name": "test-dev",
+            "full_name": "ci/test-dev",
+            "private": true,
+            "default_branch": "main"
+        },
+        "sender": {"id": 7, "login": "builder", "type": "User"}
+    }))
+    .unwrap();
+    let mut mac = Hmac::<Sha256>::new_from_slice(WEBHOOK_SECRET).unwrap();
+    mac.update(&body);
+    let signature = format!("sha256={}", hex::encode(mac.finalize().into_bytes()));
+
+    for (event_name, delivery_id) in [
+        ("issue_comment", "unimported-supported-delivery"),
+        ("issues", "unimported-observed-delivery"),
+    ] {
+        let response = application
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/webhooks/github")
+                    .header("x-hub-signature-256", &signature)
+                    .header("x-github-delivery", delivery_id)
+                    .header("x-github-event", event_name)
+                    .header(CONTENT_TYPE, "application/json")
+                    .body(Body::from(body.clone()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        let digest = ContentDigest::sha256(delivery_id.as_bytes());
+        let task_id = format!(
+            "scm-github-{}",
+            digest.as_str().trim_start_matches("sha256:")
+        );
+        assert!(control_plane.task(&task_id).is_err());
+    }
+}
+
+#[tokio::test]
 async fn github_webhook_rejects_bad_hmac_and_durably_deduplicates_valid_delivery() {
     let (control_plane, application) = application(Some(WEBHOOK_SECRET));
     control_plane

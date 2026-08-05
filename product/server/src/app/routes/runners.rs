@@ -554,6 +554,90 @@ pub(in crate::app) async fn get_runner_fleet(
     .into_response()
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PutRunnerFleetConfigurationBody {
+    #[serde(default)]
+    baseline_runtime_compatibility_digest: Option<ContentDigest>,
+    minimum_workers: u32,
+    minimum_idle_workers: u32,
+    maximum_workers: u32,
+    scale_up_batch: u32,
+    idle_timeout_ms: u64,
+    offline_grace_ms: u64,
+    cooldown_ms: u64,
+    enabled: bool,
+    templates: Vec<PutRunnerPoolTemplateBody>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PutRunnerPoolTemplateBody {
+    runtime_compatibility_digest: ContentDigest,
+    provider: String,
+    provider_template_id: String,
+    runner_template_digest: ContentDigest,
+}
+
+pub(in crate::app) async fn put_runner_fleet_configuration(
+    State(state): State<AppState>,
+    Extension(request_id): Extension<RequestId>,
+    Extension(principal): Extension<RequestPrincipal>,
+    Path(pool_id): Path<String>,
+    body: Result<Bytes, BytesRejection>,
+) -> Response {
+    let body: PutRunnerFleetConfigurationBody = match required_json(&request_id, body) {
+        Ok(body) => body,
+        Err(response) => return response,
+    };
+    let pool = match authorize_fleet_pool(&state, &request_id, &principal, &pool_id).await {
+        Ok(pool) => pool,
+        Err(response) => return response,
+    };
+    let now = match now_unix_ms(&request_id) {
+        Ok(now) => now,
+        Err(response) => return response,
+    };
+    let scaling_policy = RunnerPoolScalingPolicy {
+        pool_id: pool_id.clone(),
+        baseline_runtime_compatibility_digest: body.baseline_runtime_compatibility_digest,
+        minimum_workers: body.minimum_workers,
+        minimum_idle_workers: body.minimum_idle_workers,
+        maximum_workers: body.maximum_workers,
+        scale_up_batch: body.scale_up_batch,
+        idle_timeout_ms: body.idle_timeout_ms,
+        offline_grace_ms: body.offline_grace_ms,
+        cooldown_ms: body.cooldown_ms,
+        enabled: body.enabled,
+        updated_unix_ms: now,
+    };
+    let templates = body
+        .templates
+        .into_iter()
+        .map(|template| RunnerPoolTemplateRecord {
+            pool_id: pool_id.clone(),
+            runtime_compatibility_digest: template.runtime_compatibility_digest,
+            provider: template.provider,
+            provider_template_id: template.provider_template_id,
+            runner_template_digest: template.runner_template_digest,
+            created_unix_ms: now,
+            updated_unix_ms: now,
+        })
+        .collect();
+    match state
+        .store
+        .put_runner_pool_configuration(&runtrue_control_plane::RunnerPoolConfiguration {
+            pool,
+            scaling_policy: Some(scaling_policy),
+            templates,
+        })
+        .await
+    {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(error) => control_plane_problem(&request_id, error),
+    }
+}
+
 pub(in crate::app) async fn put_runner_update_release(
     State(state): State<AppState>,
     Extension(request_id): Extension<RequestId>,

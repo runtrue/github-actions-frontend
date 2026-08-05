@@ -1,0 +1,4 @@
+services:
+  autoscaler:
+    image: "${RUNTRUE_AUTOSCALER_IMAGE:?set a digest-pinned ghcr.io/runtrue/runtrue-autoscaler image}"
+    build: !reset null

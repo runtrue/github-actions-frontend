@@ -98,6 +98,10 @@ pub(in crate::app) async fn github_webhook(
         .await
     {
         Ok(result) => result,
+        Err(ControlPlaneError::NotFound {
+            kind: "active GitHub repository binding",
+            ..
+        }) => return StatusCode::ACCEPTED.into_response(),
         Err(error) => return control_plane_problem(&request_id, error),
     };
     let digest = ContentDigest::sha256(envelope.event_id.as_bytes());
@@ -195,6 +199,10 @@ pub(in crate::app) async fn journal_observed_github_delivery(
         .await
     {
         Ok(_) => StatusCode::ACCEPTED.into_response(),
+        Err(ControlPlaneError::NotFound {
+            kind: "active GitHub repository binding",
+            ..
+        }) => StatusCode::ACCEPTED.into_response(),
         Err(error) => control_plane_problem(request_id, error),
     }
 }
