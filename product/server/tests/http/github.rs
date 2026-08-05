@@ -1688,8 +1688,8 @@ async fn github_webhook_acknowledges_unimported_repositories_without_enqueuing_w
         "installation": {"id": 9001},
         "issue": {
             "number": 13,
-            "url": "https://github.ibm.com/api/v3/repos/ci/test-dev/issues/13",
-            "repository_url": "https://github.ibm.com/api/v3/repos/ci/test-dev"
+            "url": "https://github.enterprise.example/api/v3/repos/ci/test-dev/issues/13",
+            "repository_url": "https://github.enterprise.example/api/v3/repos/ci/test-dev"
         },
         "comment": {"id": 99, "body": "run the workflow"},
         "repository": {

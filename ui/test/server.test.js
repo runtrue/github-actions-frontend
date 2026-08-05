@@ -26,7 +26,7 @@ test("serves the full backend-supported POC surface with a strict CSP", async (t
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-security-policy"), /script-src 'self'/);
   assert.match(response.headers.get("content-security-policy"), /img-src 'self'/);
-  assert.doesNotMatch(response.headers.get("content-security-policy"), /github\.ibm\.com/);
+  assert.doesNotMatch(response.headers.get("content-security-policy"), /github\.enterprise\.example/);
   assert.match(html, /data-view="overview"/);
   assert.match(html, /id="overview-attention-list"/);
   assert.match(html, /data-view="repositories"/);

@@ -375,7 +375,7 @@ fn repository_component_has_exact_lock_bounds_and_scm_network() {
     let action = runtrue_workflow_frontend::ResolvedSourceAction::new(
         runtrue_workflow_frontend::ResolvedProgram::component(
             component.clone(),
-            "https://github.ibm.com/api/v3",
+            "https://github.enterprise.example/api/v3",
             "release@runtrue.dev",
             "runtrue:action/run@1.0.0",
         )
@@ -394,7 +394,7 @@ fn repository_component_has_exact_lock_bounds_and_scm_network() {
     assert_eq!(job.runner.cpu, 1);
     assert_eq!(job.runner.memory, "256MiB");
     let network = job.steps[0].capabilities.network.as_ref().unwrap();
-    assert_eq!(network.allow[0].host, "github.ibm.com");
+    assert_eq!(network.allow[0].host, "github.enterprise.example");
     assert_eq!(network.allow[0].port, 443);
     assert!(!network.deny_private_ranges);
     let lock = LockFile::parse(result.lockfile_toml.as_deref().unwrap().as_bytes()).unwrap();
