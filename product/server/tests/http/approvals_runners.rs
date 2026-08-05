@@ -407,3 +407,85 @@ async fn autoscaler_http_contract_is_authenticated_exact_and_fenced() {
     assert!(serialized.contains(&fleet_request_id));
     assert!(!serialized.contains(&token));
 }
+
+#[tokio::test]
+async fn autoscaler_binds_a_generic_template_to_exact_demand() {
+    let (control_plane, application) = application(None);
+    control_plane
+        .create_runner_pool(&RunnerPoolRecord {
+            id: "pool-generic-http".to_owned(),
+            tenant_id: "tenant-generic-http".to_owned(),
+            name: "generic-http".to_owned(),
+            region: None,
+            status: RunnerPoolStatus::Active,
+            created_unix_ms: 1,
+        })
+        .unwrap();
+    let generic = "sha256:e5b5fc9c576175a0bdacc09872fed2390332da870ce6140503664d07b88292ca";
+    let exact = ContentDigest::sha256(b"job-specific-http-demand");
+    let runner_template = ContentDigest::sha256(b"generic-http-template");
+    let configured = application
+        .clone()
+        .oneshot(api_request(
+            "PUT",
+            "/api/v1/runner-pools/pool-generic-http/fleet/configuration",
+            serde_json::to_vec(&json!({
+                "baseline_runtime_compatibility_digest": null,
+                "minimum_workers": 0,
+                "minimum_idle_workers": 0,
+                "maximum_workers": 1,
+                "scale_up_batch": 1,
+                "idle_timeout_ms": 60_000,
+                "offline_grace_ms": 60_000,
+                "cooldown_ms": 1_000,
+                "enabled": true,
+                "templates": [{
+                    "runtime_compatibility_digest": generic,
+                    "provider": "docker",
+                    "provider_template_id": "generic-docker",
+                    "runner_template_digest": runner_template,
+                }]
+            }))
+            .unwrap(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(configured.status(), StatusCode::NO_CONTENT);
+
+    let lease = application
+        .clone()
+        .oneshot(api_request(
+            "POST",
+            "/api/v1/runner-pools/pool-generic-http/fleet/lease",
+            serde_json::to_vec(&json!({"expires_in_ms": 45_000})).unwrap(),
+        ))
+        .await
+        .unwrap();
+    let generation = json_body(lease).await["fencing_generation"]
+        .as_u64()
+        .unwrap();
+    let created = application
+        .oneshot(api_request(
+            "POST",
+            "/api/v1/runner-pools/pool-generic-http/fleet/requests",
+            serde_json::to_vec(&json!({
+                "fencing_generation": generation,
+                "template": {
+                    "runtime_compatibility_digest": exact,
+                    "provider": "docker",
+                    "provider_template_id": "generic-docker--6e3ae4cd0d796985",
+                    "runner_template_digest": runner_template,
+                }
+            }))
+            .unwrap(),
+        ))
+        .await
+        .unwrap();
+    let status = created.status();
+    let created = json_body(created).await;
+    let templates = control_plane
+        .list_runner_pool_templates("pool-generic-http")
+        .unwrap();
+    assert_eq!(status, StatusCode::CREATED, "{created}; {templates:?}");
+    assert_eq!(created["runtime_compatibility_digest"], exact.as_str());
+}

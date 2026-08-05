@@ -21,6 +21,9 @@ use runtrue_model::ContentDigest;
 use runtrue_policy::{CedarAction, CedarResourceKind};
 use runtrue_scheduler::RunnerRecord;
 use serde::{Deserialize, Serialize};
+
+const GENERIC_RUNTIME_COMPATIBILITY_DIGEST: &str =
+    "sha256:e5b5fc9c576175a0bdacc09872fed2390332da870ce6140503664d07b88292ca";
 #[derive(Serialize)]
 pub(in crate::app) struct Items<T> {
     pub(in crate::app) items: Vec<T>,
@@ -1132,6 +1135,53 @@ pub(in crate::app) async fn create_runner_fleet_request(
         created_unix_ms: now,
         updated_unix_ms: now,
     };
+    let mut configuration = match state
+        .store
+        .runner_pool_configuration(&request.pool_id)
+        .await
+    {
+        Ok(configuration) => configuration,
+        Err(error) => return control_plane_problem(&request_id, error),
+    };
+    let has_exact_template = configuration.templates.iter().any(|template| {
+        template.runtime_compatibility_digest == request.runtime_compatibility_digest
+            && template.provider == request.provider
+            && template.provider_template_id == request.provider_template_id
+            && template.runner_template_digest == request.runner_template_digest
+    });
+    if !has_exact_template {
+        let generic = configuration.templates.iter().find(|template| {
+            template.runtime_compatibility_digest.as_str() == GENERIC_RUNTIME_COMPATIBILITY_DIGEST
+                && template.provider == request.provider
+                && request
+                    .provider_template_id
+                    .strip_prefix(&template.provider_template_id)
+                    .is_some_and(|suffix| {
+                        suffix.starts_with("--")
+                            && suffix.len() == 18
+                            && suffix[2..].bytes().all(|byte| byte.is_ascii_hexdigit())
+                    })
+                && template.runner_template_digest == request.runner_template_digest
+        });
+        if let Some(generic) = generic {
+            configuration.templates.push(RunnerPoolTemplateRecord {
+                pool_id: request.pool_id.clone(),
+                runtime_compatibility_digest: request.runtime_compatibility_digest.clone(),
+                provider: generic.provider.clone(),
+                provider_template_id: request.provider_template_id.clone(),
+                runner_template_digest: generic.runner_template_digest.clone(),
+                created_unix_ms: now,
+                updated_unix_ms: now,
+            });
+            if let Err(error) = state
+                .store
+                .put_runner_pool_configuration(&configuration)
+                .await
+            {
+                return control_plane_problem(&request_id, error);
+            }
+        }
+    }
     let owner_id = approval_actor_id(&principal);
     match state
         .store
