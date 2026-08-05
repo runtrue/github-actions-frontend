@@ -44,6 +44,7 @@ use serde_json::{json, Value};
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
+    time::Instant,
 };
 
 const BROWSER_RUN_LOG_FRAME_LIMIT: usize = 1_000;
@@ -1517,6 +1518,23 @@ pub(in crate::app) struct GitHubUiQuery {
     catalog: bool,
     #[serde(default)]
     organization: Option<String>,
+    #[serde(default)]
+    refresh: bool,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(in crate::app) struct GitHubCatalogOrganizationsQuery {
+    #[serde(default)]
+    refresh: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(in crate::app) struct GitHubCatalogRepositoriesQuery {
+    organization: String,
+    #[serde(default)]
+    refresh: bool,
 }
 pub(in crate::app) fn ui_github_permissions(value: &Value) -> Vec<UiGitHubPermission> {
     let mut permissions = Vec::new();
@@ -1577,6 +1595,24 @@ pub(super) enum GitHubCatalogLoad {
     Unavailable,
 }
 
+fn configured_github_installations(
+    state: &AppState,
+    installations: Vec<GitHubUserInstallation>,
+) -> Vec<GitHubUserInstallation> {
+    let Some(configured) = state.github_installation.as_ref() else {
+        return Vec::new();
+    };
+    installations
+        .into_iter()
+        .filter(|installation| {
+            installation.app_id == configured.public_config.app_id()
+                && installation.app_slug.as_deref().is_none_or(|app_slug| {
+                    app_slug.eq_ignore_ascii_case(configured.public_config.app_slug())
+                })
+        })
+        .collect()
+}
+
 pub(super) async fn github_catalog_for_browser_session(
     state: &AppState,
     headers: &HeaderMap,
@@ -1611,7 +1647,7 @@ pub(super) async fn github_catalog_for_browser_session(
         Ok(Ok((catalog, installations))) => GitHubCatalogLoad::Ready {
             viewer_login,
             catalog,
-            installations,
+            installations: configured_github_installations(state, installations),
         },
         Ok(Err(HumanOidcError::ProviderApiRejected)) => GitHubCatalogLoad::ReauthenticationRequired,
         _ => GitHubCatalogLoad::Unavailable,
@@ -1622,6 +1658,7 @@ async fn github_organizations_for_browser_session(
     state: &AppState,
     headers: &HeaderMap,
     session: &runtrue_auth::SessionRecord,
+    refresh: bool,
 ) -> GitHubCatalogLoad {
     let Some(human) = state.human_oidc.as_ref() else {
         return GitHubCatalogLoad::Unavailable;
@@ -1633,18 +1670,62 @@ async fn github_organizations_for_browser_session(
         Ok(credential) => credential,
         Err(_) => return GitHubCatalogLoad::ReauthenticationRequired,
     };
+    if refresh {
+        github
+            .catalog_cache
+            .invalidate_session(&credential.session_id);
+    }
+    let cached_organizations = github.catalog_cache.organizations(&credential.session_id);
+    let cached_installations = github.catalog_cache.installations(&credential.session_id);
+    if let (Some(organizations), Some(installations)) =
+        (cached_organizations.clone(), cached_installations.clone())
+    {
+        return GitHubCatalogLoad::Ready {
+            viewer_login: credential.login.clone(),
+            catalog: GitHubUserCatalog {
+                organizations,
+                repositories: Vec::new(),
+            },
+            installations: configured_github_installations(state, installations),
+        };
+    }
     let permit = match Arc::clone(&human.exchange_admission).try_acquire_owned() {
         Ok(permit) => permit,
         Err(_) => return GitHubCatalogLoad::Unavailable,
     };
     let adapter = Arc::clone(&github.adapter);
+    let cache = Arc::clone(&github.catalog_cache);
+    let session_id = credential.session_id.clone();
     let viewer_login = credential.login.clone();
     match tokio::task::spawn_blocking(move || {
         let _permit = permit;
-        let organizations = adapter.authorized_organizations(&credential.access_token)?;
-        let installations = adapter
-            .authorized_installations(&credential.access_token)
-            .unwrap_or_default();
+        let (organizations, installations) = match (cached_organizations, cached_installations) {
+            (Some(organizations), Some(installations)) => (organizations, installations),
+            (Some(organizations), None) => (
+                organizations,
+                adapter
+                    .authorized_installations(&credential.access_token)
+                    .unwrap_or_default(),
+            ),
+            (None, Some(installations)) => (
+                adapter.authorized_organizations(&credential.access_token)?,
+                installations,
+            ),
+            (None, None) => std::thread::scope(|scope| {
+                let installations = scope.spawn(|| {
+                    adapter
+                        .authorized_installations(&credential.access_token)
+                        .unwrap_or_default()
+                });
+                let organizations = adapter.authorized_organizations(&credential.access_token)?;
+                let installations = installations
+                    .join()
+                    .map_err(|_| HumanOidcError::Transport)?;
+                Ok::<_, HumanOidcError>((organizations, installations))
+            })?,
+        };
+        cache.put_organizations(&session_id, organizations.clone());
+        cache.put_installations(&session_id, installations.clone());
         Ok::<_, HumanOidcError>((organizations, installations))
     })
     .await
@@ -1655,7 +1736,7 @@ async fn github_organizations_for_browser_session(
                 organizations,
                 repositories: Vec::new(),
             },
-            installations,
+            installations: configured_github_installations(state, installations),
         },
         Ok(Err(HumanOidcError::ProviderApiRejected)) => GitHubCatalogLoad::ReauthenticationRequired,
         _ => GitHubCatalogLoad::Unavailable,
@@ -1667,6 +1748,7 @@ async fn github_repositories_for_browser_session(
     headers: &HeaderMap,
     session: &runtrue_auth::SessionRecord,
     organization: &str,
+    refresh: bool,
 ) -> GitHubCatalogLoad {
     let Some(human) = state.human_oidc.as_ref() else {
         return GitHubCatalogLoad::Unavailable;
@@ -1678,23 +1760,73 @@ async fn github_repositories_for_browser_session(
         Ok(credential) => credential,
         Err(_) => return GitHubCatalogLoad::ReauthenticationRequired,
     };
+    if refresh {
+        github
+            .catalog_cache
+            .invalidate_repository(&credential.session_id, organization);
+    }
+    let cached_repositories = github
+        .catalog_cache
+        .repositories(&credential.session_id, organization);
+    let cached_installations = github.catalog_cache.installations(&credential.session_id);
+    if let (Some(repositories), Some(installations)) =
+        (cached_repositories.clone(), cached_installations.clone())
+    {
+        return GitHubCatalogLoad::Ready {
+            viewer_login: credential.login.clone(),
+            catalog: GitHubUserCatalog {
+                organizations: vec![organization.to_owned()],
+                repositories,
+            },
+            installations: configured_github_installations(state, installations),
+        };
+    }
     let permit = match Arc::clone(&human.exchange_admission).try_acquire_owned() {
         Ok(permit) => permit,
         Err(_) => return GitHubCatalogLoad::Unavailable,
     };
     let adapter = Arc::clone(&github.adapter);
+    let cache = Arc::clone(&github.catalog_cache);
+    let session_id = credential.session_id.clone();
     let viewer_login = credential.login.clone();
     let selected_organization = organization.to_owned();
     match tokio::task::spawn_blocking(move || {
         let _permit = permit;
-        let repositories = adapter.authorized_repositories(
-            &credential.access_token,
-            &selected_organization,
-            &credential.login,
-        )?;
-        let installations = adapter
-            .authorized_installations(&credential.access_token)
-            .unwrap_or_default();
+        let (repositories, installations) = match (cached_repositories, cached_installations) {
+            (Some(repositories), Some(installations)) => (repositories, installations),
+            (Some(repositories), None) => (
+                repositories,
+                adapter
+                    .authorized_installations(&credential.access_token)
+                    .unwrap_or_default(),
+            ),
+            (None, Some(installations)) => (
+                adapter.authorized_repositories(
+                    &credential.access_token,
+                    &selected_organization,
+                    &credential.login,
+                )?,
+                installations,
+            ),
+            (None, None) => std::thread::scope(|scope| {
+                let installations = scope.spawn(|| {
+                    adapter
+                        .authorized_installations(&credential.access_token)
+                        .unwrap_or_default()
+                });
+                let repositories = adapter.authorized_repositories(
+                    &credential.access_token,
+                    &selected_organization,
+                    &credential.login,
+                )?;
+                let installations = installations
+                    .join()
+                    .map_err(|_| HumanOidcError::Transport)?;
+                Ok::<_, HumanOidcError>((repositories, installations))
+            })?,
+        };
+        cache.put_repositories(&session_id, &selected_organization, repositories.clone());
+        cache.put_installations(&session_id, installations.clone());
         Ok::<_, HumanOidcError>((repositories, installations))
     })
     .await
@@ -1705,7 +1837,7 @@ async fn github_repositories_for_browser_session(
                 organizations: vec![organization.to_owned()],
                 repositories,
             },
-            installations,
+            installations: configured_github_installations(state, installations),
         },
         Ok(Err(HumanOidcError::ProviderApiRejected)) => GitHubCatalogLoad::ReauthenticationRequired,
         _ => GitHubCatalogLoad::Unavailable,
@@ -1858,6 +1990,61 @@ pub(in crate::app) async fn github_browser_state(
     headers: HeaderMap,
     Query(query): Query<GitHubUiQuery>,
 ) -> Response {
+    let include_dashboard = !query.catalog;
+    github_browser_state_response(state, request_id, headers, query, include_dashboard).await
+}
+
+pub(in crate::app) async fn github_catalog_organizations(
+    State(state): State<AppState>,
+    Extension(request_id): Extension<RequestId>,
+    headers: HeaderMap,
+    Query(query): Query<GitHubCatalogOrganizationsQuery>,
+) -> Response {
+    github_browser_state_response(
+        state,
+        request_id,
+        headers,
+        GitHubUiQuery {
+            github: None,
+            catalog: true,
+            organization: None,
+            refresh: query.refresh,
+        },
+        false,
+    )
+    .await
+}
+
+pub(in crate::app) async fn github_catalog_repositories(
+    State(state): State<AppState>,
+    Extension(request_id): Extension<RequestId>,
+    headers: HeaderMap,
+    Query(query): Query<GitHubCatalogRepositoriesQuery>,
+) -> Response {
+    github_browser_state_response(
+        state,
+        request_id,
+        headers,
+        GitHubUiQuery {
+            github: None,
+            catalog: true,
+            organization: Some(query.organization),
+            refresh: query.refresh,
+        },
+        false,
+    )
+    .await
+}
+
+async fn github_browser_state_response(
+    state: AppState,
+    request_id: RequestId,
+    headers: HeaderMap,
+    query: GitHubUiQuery,
+    include_dashboard: bool,
+) -> Response {
+    let request_started = Instant::now();
+    let mut catalog_elapsed = None;
     let now = match now_unix_ms(&request_id) {
         Ok(now) => now,
         Err(response) => return response,
@@ -1989,40 +2176,47 @@ pub(in crate::app) async fn github_browser_state(
         })
         .collect::<Vec<_>>();
     let mut events = Vec::new();
-    for repository in &status.repositories {
-        let Some(linked_repository_id) = repository.linked_repository_id.as_deref() else {
-            continue;
-        };
-        let records = match state
-            .store
-            .scm_webhook_events_for_repository(&context.tenant_id, linked_repository_id, None, 10)
-            .await
-        {
-            Ok(records) => records,
-            Err(error) => return control_plane_problem(&request_id, error),
-        };
-        for event in records {
-            events.push(GitHubRepositoryEventView {
-                delivery_id: event.delivery_id,
-                repository: repository.full_name.clone(),
-                provider_event_name: event.provider_event_name,
-                event_kind: event.event_kind,
-                actor_login: event.actor_login,
-                ref_name: event.ref_name,
-                received_at: match timestamp(event.received_unix_ms) {
-                    Ok(value) => value,
-                    Err(()) => return internal_problem(&request_id),
-                },
-            });
+    if include_dashboard {
+        for repository in &status.repositories {
+            let Some(linked_repository_id) = repository.linked_repository_id.as_deref() else {
+                continue;
+            };
+            let records = match state
+                .store
+                .scm_webhook_events_for_repository(
+                    &context.tenant_id,
+                    linked_repository_id,
+                    None,
+                    10,
+                )
+                .await
+            {
+                Ok(records) => records,
+                Err(error) => return control_plane_problem(&request_id, error),
+            };
+            for event in records {
+                events.push(GitHubRepositoryEventView {
+                    delivery_id: event.delivery_id,
+                    repository: repository.full_name.clone(),
+                    provider_event_name: event.provider_event_name,
+                    event_kind: event.event_kind,
+                    actor_login: event.actor_login,
+                    ref_name: event.ref_name,
+                    received_at: match timestamp(event.received_unix_ms) {
+                        Ok(value) => value,
+                        Err(()) => return internal_problem(&request_id),
+                    },
+                });
+            }
         }
+        events.sort_by(|left, right| {
+            right
+                .received_at
+                .cmp(&left.received_at)
+                .then_with(|| right.delivery_id.cmp(&left.delivery_id))
+        });
+        events.truncate(50);
     }
-    events.sort_by(|left, right| {
-        right
-            .received_at
-            .cmp(&left.received_at)
-            .then_with(|| right.delivery_id.cmp(&left.delivery_id))
-    });
-    events.truncate(50);
     let configured = status.configured;
     let app_ready = configured && status.webhook_configured;
     let idempotency_key = match random_id("github-install") {
@@ -2080,13 +2274,24 @@ pub(in crate::app) async fn github_browser_state(
         }) {
             return invalid_object_problem(&request_id, "invalid GitHub organization");
         }
+        let catalog_started = Instant::now();
         let catalog = match query.organization.as_deref() {
             Some(organization) => {
-                github_repositories_for_browser_session(&state, &headers, &session, organization)
+                github_repositories_for_browser_session(
+                    &state,
+                    &headers,
+                    &session,
+                    organization,
+                    query.refresh,
+                )
+                .await
+            }
+            None => {
+                github_organizations_for_browser_session(&state, &headers, &session, query.refresh)
                     .await
             }
-            None => github_organizations_for_browser_session(&state, &headers, &session).await,
         };
+        catalog_elapsed = Some(catalog_started.elapsed());
         match catalog {
             GitHubCatalogLoad::Ready {
                 viewer_login,
@@ -2112,18 +2317,38 @@ pub(in crate::app) async fn github_browser_state(
         payload["organizations"] = json!([]);
         payload["userCatalog"] = json!({"status": "not_loaded"});
     }
-    let sections = match browser_dashboard_sections(&state, &request_id, &context, &page).await {
-        Ok(sections) => sections,
-        Err(response) => return response.into_response(),
-    };
-    if let (Some(payload), Some(sections)) = (payload.as_object_mut(), sections.as_object()) {
-        payload.extend(sections.clone());
+    if !include_dashboard {
+        payload = json!({
+            "organizations": payload["organizations"].take(),
+            "userCatalog": payload["userCatalog"].take(),
+            "installAction": payload["installAction"].take(),
+            "github": payload["github"].take(),
+        });
+    }
+    if include_dashboard {
+        let sections = match browser_dashboard_sections(&state, &request_id, &context, &page).await
+        {
+            Ok(sections) => sections,
+            Err(response) => return response.into_response(),
+        };
+        if let (Some(payload), Some(sections)) = (payload.as_object_mut(), sections.as_object()) {
+            payload.extend(sections.clone());
+        }
     }
     let mut response = Json(payload).into_response();
     response.headers_mut().insert(
         CACHE_CONTROL,
         HeaderValue::from_static(GITHUB_BROWSER_API_CACHE_CONTROL),
     );
+    let total_elapsed = request_started.elapsed();
+    let catalog_ms = catalog_elapsed.map_or(0.0, |elapsed| elapsed.as_secs_f64() * 1_000.0);
+    let local_ms = (total_elapsed.as_secs_f64() * 1_000.0 - catalog_ms).max(0.0);
+    if let Ok(value) = HeaderValue::from_str(&format!(
+        "local;dur={local_ms:.1}, github_catalog;dur={catalog_ms:.1}, total;dur={:.1}",
+        total_elapsed.as_secs_f64() * 1_000.0
+    )) {
+        response.headers_mut().insert("server-timing", value);
+    }
     protect_sensitive_response(&mut response);
     response
 }
@@ -3388,6 +3613,7 @@ async fn manage_github_installation_from_ui(
                         return control_plane_problem(&request_id, error);
                     }
                 }
+                state.invalidate_github_catalog_cache();
                 let mut response = StatusCode::SEE_OTHER.into_response();
                 response
                     .headers_mut()
@@ -3826,6 +4052,8 @@ mod user_catalog_tests {
         };
         let user_installations = vec![GitHubUserInstallation {
             installation_id: 42_417,
+            app_id: 123,
+            app_slug: Some("runtrue-http-test".to_owned()),
             account_id: 431,
             account_login: "AgentOps".to_owned(),
         }];

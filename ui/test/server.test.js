@@ -227,13 +227,14 @@ test("add repositories opens the local picker without starting GitHub installati
 
   assert.match(openDialog, /add-repo-dialog/);
   assert.match(openDialog, /showModal\(\)/);
-  assert.match(openDialog, /loadOrganizations\(\)/);
+  assert.match(openDialog, /loadOrganizations\(\{ preserveSelection: hasCatalog \}\)/);
   assert.match(openDialog, /status: "loading"/);
-  assert.match(script, /\/api\/v1\/ui\/github\?catalog=true/);
-  assert.match(script, /catalog=true&organization=/);
+  assert.match(script, /\/api\/v1\/ui\/github\/catalog\/organizations/);
+  assert.match(script, /\/api\/v1\/ui\/github\/catalog\/repositories/);
   assert.match(script, /cache: "no-store"/);
   assert.doesNotMatch(script, /sessionStorage/);
-  assert.doesNotMatch(script, /status: "cached"/);
+  assert.match(script, /organization\.repositoriesStatus === "ready"/);
+  assert.match(script, /force: true/);
   assert.match(script, /dialog-manage-github.*submitInstallAction/);
   assert.doesNotMatch(openDialog, /submitInstallAction/);
 });
@@ -263,7 +264,7 @@ test("repository picker uses signed-in GitHub visibility and exposes app install
   assert.match(script, /Update GitHub App access/);
   assert.match(script, /function refreshGitHubAccess\(\)/);
   assert.match(script, /function reloadGitHubData\(\)/);
-  assert.match(script, /function loadOrganizationRepositories\(organizationId\)/);
+  assert.match(script, /function loadOrganizationRepositories\(organizationId, \{ force = false \} = \{\}\)/);
   assert.match(script, /function toggleVisibleRepositories\(\)/);
   assert.match(script, /function repositoriesAreCompatible\(first, candidate\)/);
   assert.match(script, /organization\.repositoriesStatus = loaded \? "ready" : "unavailable"/);

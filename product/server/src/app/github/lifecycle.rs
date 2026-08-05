@@ -300,6 +300,7 @@ pub(in crate::app) async fn github_lifecycle_projection(
             github_lifecycle_retry("repository-link-reconciliation-failed", None),
         ));
     }
+    state.invalidate_github_catalog_cache();
     github
         .metrics
         .reconciliations

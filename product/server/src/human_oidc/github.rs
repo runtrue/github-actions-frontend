@@ -152,6 +152,9 @@ struct GitHubInstallationAccountResponse {
 #[derive(Deserialize)]
 struct GitHubInstallationResponse {
     id: u64,
+    app_id: u64,
+    #[serde(default)]
+    app_slug: Option<String>,
     account: GitHubInstallationAccountResponse,
     #[serde(default)]
     suspended_at: Option<String>,
@@ -420,6 +423,12 @@ impl GitHubOauthAdapter for HardenedGitHubOauthClient {
                     continue;
                 }
                 if installation.id == 0
+                    || installation.app_id == 0
+                    || installation.app_slug.as_ref().is_some_and(|app_slug| {
+                        app_slug.is_empty()
+                            || app_slug.len() > 255
+                            || app_slug.chars().any(char::is_control)
+                    })
                     || installation.account.id == 0
                     || installation.account.login.is_empty()
                     || installation.account.login.len() > 255
@@ -431,6 +440,8 @@ impl GitHubOauthAdapter for HardenedGitHubOauthClient {
                     installation.id,
                     GitHubUserInstallation {
                         installation_id: installation.id,
+                        app_id: installation.app_id,
+                        app_slug: installation.app_slug,
                         account_id: installation.account.id,
                         account_login: installation.account.login,
                     },
@@ -493,12 +504,14 @@ mod tests {
         let page: GitHubInstallationPageResponse = serde_json::from_value(serde_json::json!({
             "total_count": 2,
             "installations": [
-                {"id": 42417, "account": {"id": 431, "login": "AgentOps"}, "suspended_at": null},
-                {"id": 42418, "account": {"id": 432, "login": "Paused"}, "suspended_at": "2026-08-03T00:00:00Z"}
+                {"id": 42417, "app_id": 5764, "app_slug": "agentops", "account": {"id": 431, "login": "AgentOps"}, "suspended_at": null},
+                {"id": 42418, "app_id": 5764, "app_slug": "agentops", "account": {"id": 432, "login": "Paused"}, "suspended_at": "2026-08-03T00:00:00Z"}
             ]
         }))
         .unwrap();
         assert_eq!(page.installations.len(), 2);
+        assert_eq!(page.installations[0].app_id, 5764);
+        assert_eq!(page.installations[0].app_slug.as_deref(), Some("agentops"));
         assert_eq!(page.installations[0].account.login, "AgentOps");
         assert!(page.installations[0].suspended_at.is_none());
         assert!(page.installations[1].suspended_at.is_some());

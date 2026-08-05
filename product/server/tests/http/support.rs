@@ -118,8 +118,11 @@ impl HumanOidcAdapter for FakeHumanOidcAdapter {
     }
 }
 
-#[derive(Debug)]
-pub(super) struct FakeGitHubOauthAdapter;
+#[derive(Debug, Default)]
+pub(super) struct FakeGitHubOauthAdapter {
+    pub(super) catalog_calls: AtomicU64,
+    pub(super) installation_calls: AtomicU64,
+}
 
 impl GitHubOauthAdapter for FakeGitHubOauthAdapter {
     fn exchange_authorization_code(
@@ -138,6 +141,7 @@ impl GitHubOauthAdapter for FakeGitHubOauthAdapter {
     }
 
     fn authorized_catalog(&self, _access_token: &str) -> Result<GitHubUserCatalog, HumanOidcError> {
+        self.catalog_calls.fetch_add(1, Ordering::Relaxed);
         Ok(GitHubUserCatalog {
             organizations: vec!["octo".to_owned()],
             repositories: vec![
@@ -165,11 +169,23 @@ impl GitHubOauthAdapter for FakeGitHubOauthAdapter {
         &self,
         _access_token: &str,
     ) -> Result<Vec<GitHubUserInstallation>, HumanOidcError> {
-        Ok(vec![GitHubUserInstallation {
-            installation_id: 9_001,
-            account_id: 501,
-            account_login: "octo".to_owned(),
-        }])
+        self.installation_calls.fetch_add(1, Ordering::Relaxed);
+        Ok(vec![
+            GitHubUserInstallation {
+                installation_id: 8_001,
+                app_id: 999,
+                app_slug: Some("another-app".to_owned()),
+                account_id: 501,
+                account_login: "octo".to_owned(),
+            },
+            GitHubUserInstallation {
+                installation_id: 9_001,
+                app_id: 123,
+                app_slug: Some("runtrue-http-test".to_owned()),
+                account_id: 501,
+                account_login: "octo".to_owned(),
+            },
+        ])
     }
 }
 
@@ -447,12 +463,13 @@ pub(super) fn github_human_application() -> (
 pub(super) async fn github_oauth_application() -> (
     Arc<ControlPlane>,
     Arc<FakeGitHubInstallationProvider>,
+    Arc<FakeGitHubOauthAdapter>,
     Router,
 ) {
     let control = Arc::new(ControlPlane::open_in_memory("github-oauth-http", 1).unwrap());
     let provider = Arc::new(FakeGitHubInstallationProvider::new());
     let human_oidc = Arc::new(FakeHumanOidcAdapter::default());
-    let github_oauth = Arc::new(FakeGitHubOauthAdapter);
+    let github_oauth = Arc::new(FakeGitHubOauthAdapter::default());
     let state = github_state(Arc::clone(&control), Arc::clone(&provider))
         .with_human_oidc(
             "https://runtrue.example".to_owned(),
@@ -466,13 +483,13 @@ pub(super) async fn github_oauth_application() -> (
             tenant_name: "Tenant Browser".to_owned(),
             web_origin: "https://github.com".to_owned(),
             client_id: "Iv1.test".to_owned(),
-            adapter: github_oauth,
+            adapter: Arc::clone(&github_oauth) as Arc<dyn GitHubOauthAdapter>,
             allowed_roles: BTreeMap::from([(42, "policy-administrator".to_owned())]),
             now_unix_ms: unix_ms_now(),
         })
         .await
         .unwrap();
-    (control, provider, router(state))
+    (control, provider, github_oauth, router(state))
 }
 
 pub(super) fn response_cookie(response: &Response, name: &str) -> Option<String> {

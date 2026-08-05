@@ -510,6 +510,7 @@ pub(in crate::app) async fn sync_github_installation(
     if let Err(error) = provision_selected_github_repositories(&state, &reconciliation).await {
         return control_plane_problem(&request_id, error);
     }
+    state.invalidate_github_catalog_cache();
     if let Some(github) = &state.github_installation {
         github
             .metrics

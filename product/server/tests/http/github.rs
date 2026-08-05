@@ -2,7 +2,7 @@ use super::support::*;
 
 #[tokio::test]
 async fn github_browser_imports_an_existing_app_installation_without_starting_setup() {
-    let (control, provider, application) = github_oauth_application().await;
+    let (control, provider, _, application) = github_oauth_application().await;
     let begin = application
         .clone()
         .oneshot(
@@ -82,6 +82,109 @@ async fn github_browser_imports_an_existing_app_installation_without_starting_se
     assert_eq!(unavailable.status(), StatusCode::CONFLICT);
     assert!(!unavailable.headers().contains_key(LOCATION));
     assert_eq!(provider.calls.load(Ordering::Relaxed), 2);
+}
+
+#[tokio::test]
+async fn github_catalog_routes_are_lean_cached_and_explicitly_refreshable() {
+    let (_, _, github_oauth, application) = github_oauth_application().await;
+    let begin = application
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/auth/login")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let login_cookie = response_cookie(&begin, "runtrue_login").unwrap();
+    let state = location_parameter(begin.headers()[LOCATION].to_str().unwrap(), "state");
+    let login = application
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/auth/callback?code=github-code&state={state}"))
+                .header("cookie", format!("runtrue_login={login_cookie}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let cookies = browser_cookie_header(&login);
+
+    let catalog_request = |uri: &'static str| {
+        Request::builder()
+            .uri(uri)
+            .header("cookie", &cookies)
+            .body(Body::empty())
+            .unwrap()
+    };
+    let organizations = application
+        .clone()
+        .oneshot(catalog_request("/api/v1/ui/github/catalog/organizations"))
+        .await
+        .unwrap();
+    assert_eq!(organizations.status(), StatusCode::OK);
+    assert_eq!(organizations.headers()["cache-control"], "no-store");
+    assert!(organizations.headers().contains_key("server-timing"));
+    let organizations = json_body(organizations).await;
+    assert!(organizations.get("runs").is_none());
+    assert!(organizations.get("session").is_none());
+    assert!(organizations.get("repositories").is_none());
+    assert_eq!(organizations["userCatalog"]["status"], "ready");
+    assert_eq!(github_oauth.catalog_calls.load(Ordering::Relaxed), 1);
+    assert_eq!(github_oauth.installation_calls.load(Ordering::Relaxed), 1);
+
+    let cached = application
+        .clone()
+        .oneshot(catalog_request("/api/v1/ui/github/catalog/organizations"))
+        .await
+        .unwrap();
+    assert_eq!(cached.status(), StatusCode::OK);
+    assert_eq!(github_oauth.catalog_calls.load(Ordering::Relaxed), 1);
+    assert_eq!(github_oauth.installation_calls.load(Ordering::Relaxed), 1);
+
+    let repositories = application
+        .clone()
+        .oneshot(catalog_request(
+            "/api/v1/ui/github/catalog/repositories?organization=octo",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(repositories.status(), StatusCode::OK);
+    assert_eq!(github_oauth.catalog_calls.load(Ordering::Relaxed), 2);
+    assert_eq!(github_oauth.installation_calls.load(Ordering::Relaxed), 1);
+
+    let cached_repositories = application
+        .clone()
+        .oneshot(catalog_request(
+            "/api/v1/ui/github/catalog/repositories?organization=octo",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(cached_repositories.status(), StatusCode::OK);
+    assert_eq!(github_oauth.catalog_calls.load(Ordering::Relaxed), 2);
+
+    let refreshed_repositories = application
+        .clone()
+        .oneshot(catalog_request(
+            "/api/v1/ui/github/catalog/repositories?organization=octo&refresh=true",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(refreshed_repositories.status(), StatusCode::OK);
+    assert_eq!(github_oauth.catalog_calls.load(Ordering::Relaxed), 3);
+    assert_eq!(github_oauth.installation_calls.load(Ordering::Relaxed), 1);
+
+    let refreshed = application
+        .oneshot(catalog_request(
+            "/api/v1/ui/github/catalog/organizations?refresh=true",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(refreshed.status(), StatusCode::OK);
+    assert_eq!(github_oauth.catalog_calls.load(Ordering::Relaxed), 4);
+    assert_eq!(github_oauth.installation_calls.load(Ordering::Relaxed), 2);
 }
 
 #[tokio::test]
