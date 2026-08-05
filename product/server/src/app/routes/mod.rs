@@ -31,9 +31,9 @@ pub(super) use runners::{
     acquire_runner_fleet_lease, activate_runner_replacement, create_enrollment_token,
     create_fixed_update_claim, create_runner_fleet_request, create_runner_launch_claim,
     create_runner_pool, drain_runner, get_runner, get_runner_capsule_trust_key, get_runner_fleet,
-    get_runner_pool, list_runner_pools, list_runners, plan_runner_replacement, put_runner_slot,
-    put_runner_update_policy, put_runner_update_release, scope_tenant,
-    transition_runner_fleet_request, Items,
+    get_runner_pool, list_runner_pools, list_runners, plan_runner_replacement,
+    put_runner_fleet_configuration, put_runner_slot, put_runner_update_policy,
+    put_runner_update_release, scope_tenant, transition_runner_fleet_request, Items,
 };
 pub(super) use runs::{
     cancel_run, create_replay_bundle, create_run, get_replay_bundle, get_run, get_run_logs,

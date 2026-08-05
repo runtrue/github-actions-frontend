@@ -23,6 +23,12 @@ cargo build --locked --release -p runtrue-server --bin runtrue-quickstart
 
 The standalone UI and core server remain available for split deployments.
 Execution runners remain separate because they execute untrusted workloads.
+For quick-start capacity, configure the existing `runtrue-autoscaler` runtime
+and a provider-backed runner pool. The quick-start server can supervise that
+runtime with `--embedded-autoscaler`, while container deployments should keep
+the same runtime in its separate hardened service so only it receives provider
+credentials such as the Docker socket. A zero-runner idle state is expected
+when the pool policy permits scale-to-zero.
 
 Implemented routes:
 
