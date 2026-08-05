@@ -1,14 +1,29 @@
 # syntax=docker/dockerfile:1.10@sha256:865e5dd094beca432e8c0a1d5e1c465db5f998dca4e439981029b3b81fb39ed5
 ARG RUST_IMAGE=docker.io/library/rust:1.94.0-bookworm@sha256:365468470075493dc4583f47387001854321c5a8583ea9604b297e67f01c5a4f
 ARG RUNTIME_IMAGE=docker.io/library/debian:bookworm-20250630-slim@sha256:6ac2c08566499cc2415926653cf2ed7c3aedac445675a013cc09469c9e118fdd
+ARG CARGO_CHEF_VERSION=0.1.77
 
-FROM ${RUST_IMAGE} AS build
+FROM ${RUST_IMAGE} AS chef
+ARG CARGO_CHEF_VERSION
 ENV RUSTUP_TOOLCHAIN=1.94.0
 WORKDIR /src
+RUN --mount=type=cache,id=runtrue-gha-cargo-registry-v1,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=runtrue-gha-cargo-git-v1,target=/usr/local/cargo/git,sharing=locked \
+    cargo install --locked --version "${CARGO_CHEF_VERSION}" cargo-chef
+
+FROM chef AS planner
+COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS build
+COPY --from=planner /src/recipe.json recipe.json
+RUN --mount=type=cache,id=runtrue-gha-cargo-registry-v1,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=runtrue-gha-cargo-git-v1,target=/usr/local/cargo/git,sharing=locked \
+    CARGO_NET_GIT_FETCH_WITH_CLI=true \
+      cargo chef cook --locked --release --package runtrue-server --bin runtrue-server --recipe-path recipe.json
 COPY . .
 RUN --mount=type=cache,id=runtrue-gha-cargo-registry-v1,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=runtrue-gha-cargo-git-v1,target=/usr/local/cargo/git,sharing=locked \
-    --mount=type=cache,id=runtrue-gha-release-target-v1,target=/src/target,sharing=locked \
     CARGO_NET_GIT_FETCH_WITH_CLI=true \
       cargo build --locked --release -p runtrue-server --bin runtrue-server; \
     install -D -m 0555 target/release/runtrue-server /out/runtrue-server
