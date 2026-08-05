@@ -70,9 +70,12 @@ mod tests {
             }],
             events: vec![GitHubRepositoryEventView {
                 delivery_id: "delivery-1".to_owned(),
+                repository_id: "repo-9".to_owned(),
                 repository: "octo/runtrue".to_owned(),
                 provider_event_name: "push".to_owned(),
                 event_kind: "push".to_owned(),
+                event_action: None,
+                processing_status: "pending".to_owned(),
                 actor_login: "ada".to_owned(),
                 ref_name: Some("refs/heads/main".to_owned()),
                 received_at: "2026-07-13T00:00:00Z".to_owned(),
@@ -110,6 +113,11 @@ mod tests {
             "octo"
         );
         assert_eq!(payload["github"]["events"][0]["deliveryId"], "delivery-1");
+        assert_eq!(payload["github"]["events"][0]["repositoryId"], "repo-9");
+        assert_eq!(
+            payload["github"]["events"][0]["processingStatus"],
+            "pending"
+        );
         assert!(payload.get("runs").is_none());
         assert!(payload.get("approvals").is_none());
         assert!(payload.get("runners").is_none());

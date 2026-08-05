@@ -276,9 +276,12 @@ pub struct GitHubRepositoryCandidateAction {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GitHubRepositoryEventView {
     pub delivery_id: String,
+    pub repository_id: String,
     pub repository: String,
     pub provider_event_name: String,
     pub event_kind: String,
+    pub event_action: Option<String>,
+    pub processing_status: String,
     pub actor_login: String,
     pub ref_name: Option<String>,
     pub received_at: String,

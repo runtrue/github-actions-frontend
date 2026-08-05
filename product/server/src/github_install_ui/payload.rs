@@ -58,9 +58,12 @@ pub fn github_installations_payload(page: &GitHubInstallationsPage) -> Value {
         .map(|event| {
             json!({
                 "deliveryId": event.delivery_id,
+                "repositoryId": event.repository_id,
                 "repository": event.repository,
                 "providerEventName": event.provider_event_name,
                 "eventKind": event.event_kind,
+                "eventAction": event.event_action,
+                "processingStatus": event.processing_status,
                 "actorLogin": event.actor_login,
                 "refName": event.ref_name,
                 "receivedAt": event.received_at,

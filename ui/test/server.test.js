@@ -43,6 +43,8 @@ test("serves the full backend-supported POC surface with a strict CSP", async (t
   assert.match(html, /id="login-shell"[^>]*hidden/);
   assert.match(html, /id="run-detail-dialog"/);
   assert.match(html, /id="refresh-repository-runs"/);
+  assert.match(html, /id="repository-events-body"/);
+  assert.match(html, /Incoming events/);
   assert.match(html, /id="run-source-card"/);
   assert.match(html, /id="retry-run"[^>]*disabled/);
   assert.match(html, /id="run-job-list"/);
