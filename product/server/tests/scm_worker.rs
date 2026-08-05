@@ -1376,7 +1376,7 @@ fn github_repository_action_resolution_is_exact_authorized_and_builder_agnostic(
     let commit = output(root.path(), &["rev-parse", "HEAD"]);
     let reference = format!("ci/backport@{commit}");
     let image = format!(
-        "containers.github.ibm.com/ci/runtrue-action-cache@sha256:{}",
+        "containers.github.enterprise.example/ci/runtrue-action-cache@sha256:{}",
         "c".repeat(64)
     );
 
@@ -1445,8 +1445,8 @@ fn github_repository_action_resolution_is_exact_authorized_and_builder_agnostic(
                     account_login: account_login.to_owned(),
                     account_kind: ControlPlaneGitHubAccountKind::Organization,
                     repository_selection: ControlPlaneGitHubRepositorySelection::All,
-                    web_origin: "https://github.ibm.com".to_owned(),
-                    api_origin: "https://github.ibm.com/api/v3".to_owned(),
+                    web_origin: "https://github.enterprise.example".to_owned(),
+                    api_origin: "https://github.enterprise.example/api/v3".to_owned(),
                     lifecycle_generation: 1,
                     synchronized_unix_ms: NOW,
                     suspended_unix_ms: None,
@@ -1535,8 +1535,11 @@ fn github_repository_action_resolution_is_exact_authorized_and_builder_agnostic(
         Arc::clone(&control),
         fetcher.clone(),
         installation_provider.clone(),
-        GitHubProviderEndpoints::new("https://github.ibm.com", "https://github.ibm.com/api/v3")
-            .unwrap(),
+        GitHubProviderEndpoints::new(
+            "https://github.enterprise.example",
+            "https://github.enterprise.example/api/v3",
+        )
+        .unwrap(),
         builder.clone(),
     );
     let request = SourceActionResolutionRequest::new(
@@ -1660,7 +1663,7 @@ fn github_repository_action_resolution_is_exact_authorized_and_builder_agnostic(
         resolved_component,
         format!("wasm://ghcr.io/runtrue/backport@sha256:{component_digest}")
     );
-    assert_eq!(api_url, "https://github.ibm.com/api/v3");
+    assert_eq!(api_url, "https://github.enterprise.example/api/v3");
     assert_eq!(signature_identity, "release@runtrue.dev");
     assert_eq!(interface, "runtrue:action/run@1.0.0");
     assert_eq!(
@@ -1673,8 +1676,11 @@ fn github_repository_action_resolution_is_exact_authorized_and_builder_agnostic(
         Arc::clone(&control),
         fetcher,
         installation_provider,
-        GitHubProviderEndpoints::new("https://github.ibm.com", "https://github.ibm.com/api/v3")
-            .unwrap(),
+        GitHubProviderEndpoints::new(
+            "https://github.enterprise.example",
+            "https://github.enterprise.example/api/v3",
+        )
+        .unwrap(),
     );
     assert!(component_only_resolver
         .resolve(
