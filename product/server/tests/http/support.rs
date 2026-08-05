@@ -140,14 +140,24 @@ impl GitHubOauthAdapter for FakeGitHubOauthAdapter {
     fn authorized_catalog(&self, _access_token: &str) -> Result<GitHubUserCatalog, HumanOidcError> {
         Ok(GitHubUserCatalog {
             organizations: vec!["octo".to_owned()],
-            repositories: vec![GitHubUserRepository {
-                repository_id: 77,
-                owner_id: 501,
-                owner: "octo".to_owned(),
-                name: "runtrue".to_owned(),
-                visibility: "private".to_owned(),
-                default_branch: "main".to_owned(),
-            }],
+            repositories: vec![
+                GitHubUserRepository {
+                    repository_id: 77,
+                    owner_id: 501,
+                    owner: "octo".to_owned(),
+                    name: "runtrue".to_owned(),
+                    visibility: "private".to_owned(),
+                    default_branch: "main".to_owned(),
+                },
+                GitHubUserRepository {
+                    repository_id: 78,
+                    owner_id: 501,
+                    owner: "octo".to_owned(),
+                    name: "not-granted".to_owned(),
+                    visibility: "private".to_owned(),
+                    default_branch: "main".to_owned(),
+                },
+            ],
         })
     }
 

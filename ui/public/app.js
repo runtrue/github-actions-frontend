@@ -1648,13 +1648,9 @@
   }
 
   function submitImportAction(repositories) {
-    const action = state.data.installAction;
-    if (!action) return showToast("GitHub App configuration is not ready.");
-    submitLocalForm("/github/installations/start", {
-      csrf_token: action.csrfToken,
-      idempotency_key: action.idempotencyKey,
+    submitLocalForm("/github/installations/import", {
+      csrf_token: state.data.session.csrfToken,
       repository_ids: repositories.map((repository) => repository.externalRepositoryId).join(","),
-      import_only: "true",
     });
   }
 
