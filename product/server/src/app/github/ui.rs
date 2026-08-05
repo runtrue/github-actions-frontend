@@ -3171,6 +3171,11 @@ pub(in crate::app) async fn start_github_installation_from_ui(
         Ok(Some(value)) if !value.is_empty() => value,
         _ => return invalid_object_problem(&request_id, "invalid GitHub setup idempotency key"),
     };
+    let import_only = match form_value(&body, "import_only") {
+        Ok(Some(value)) if value == "true" => true,
+        Ok(None) => false,
+        _ => return invalid_object_problem(&request_id, "invalid GitHub setup action"),
+    };
     let now = match now_unix_ms(&request_id) {
         Ok(now) => now,
         Err(response) => return response,
@@ -3236,17 +3241,22 @@ pub(in crate::app) async fn start_github_installation_from_ui(
     let repository_preselection = if repository_ids.is_empty() {
         None
     } else {
-        let catalog = match github_catalog_for_browser_session(&state, &headers, &session).await {
-            GitHubCatalogLoad::Ready { catalog, .. } => catalog,
-            GitHubCatalogLoad::ReauthenticationRequired | GitHubCatalogLoad::Unavailable => {
-                return problem_response(
-                    &request_id,
-                    StatusCode::CONFLICT,
-                    "GitHub access must be refreshed",
-                    "refresh GitHub access before installing the App on selected repositories",
-                )
-            }
-        };
+        let (catalog, authorized_installations) =
+            match github_catalog_for_browser_session(&state, &headers, &session).await {
+                GitHubCatalogLoad::Ready {
+                    catalog,
+                    installations,
+                    ..
+                } => (catalog, installations),
+                GitHubCatalogLoad::ReauthenticationRequired | GitHubCatalogLoad::Unavailable => {
+                    return problem_response(
+                        &request_id,
+                        StatusCode::CONFLICT,
+                        "GitHub access must be refreshed",
+                        "refresh GitHub access before managing selected repositories",
+                    )
+                }
+            };
         let repositories = catalog
             .repositories
             .iter()
@@ -3275,14 +3285,21 @@ pub(in crate::app) async fn start_github_installation_from_ui(
             Ok(installations) => installations,
             Err(error) => return control_plane_problem(&request_id, error),
         };
-        if let Some(existing) = existing_installations.into_iter().find(|installation| {
-            installation.installation.status == "active"
-                && installation.account_login.eq_ignore_ascii_case(&owner)
-        }) {
-            let external_installation_id = match existing.installation.external_id.parse::<u64>() {
-                Ok(id) if id != 0 => id,
-                _ => return internal_problem(&request_id),
-            };
+        let target_id = *target_ids.iter().next().unwrap_or(&0);
+        let local_installation_id = existing_installations
+            .into_iter()
+            .find(|installation| {
+                installation.installation.status == "active"
+                    && installation.account_login.eq_ignore_ascii_case(&owner)
+            })
+            .and_then(|installation| installation.installation.external_id.parse::<u64>().ok())
+            .filter(|installation_id| *installation_id != 0);
+        let authorized_installation_id = authorized_installations
+            .iter()
+            .find(|installation| installation.account_id == target_id)
+            .map(|installation| installation.installation_id);
+        if let Some(external_installation_id) = local_installation_id.or(authorized_installation_id)
+        {
             let snapshot = match inspect_github_installation(
                 &state,
                 &request_id,
@@ -3300,7 +3317,8 @@ pub(in crate::app) async fn start_github_installation_from_ui(
                 .filter(|repository| !repository.disabled)
                 .map(|repository| repository.id)
                 .collect::<std::collections::BTreeSet<_>>();
-            if snapshot.repository_catalog_complete
+            if snapshot.account.id == target_id
+                && snapshot.repository_catalog_complete
                 && repository_ids
                     .iter()
                     .all(|repository_id| granted.contains(repository_id))
@@ -3368,11 +3386,22 @@ pub(in crate::app) async fn start_github_installation_from_ui(
                 return response;
             }
         }
-        Some((
-            *target_ids.iter().next().unwrap_or(&0),
-            repository_ids.as_slice(),
-        ))
+        if import_only {
+            return problem_response(
+                &request_id,
+                StatusCode::CONFLICT,
+                "Repository access unavailable",
+                "the existing GitHub App installation does not grant access to every selected repository; update GitHub App access and reload",
+            );
+        }
+        Some((target_id, repository_ids.as_slice()))
     };
+    if import_only {
+        return invalid_object_problem(
+            &request_id,
+            "repository selection is required when importing a GitHub App installation",
+        );
+    }
     let setup = match start_github_setup_service(
         &state,
         &request_id,

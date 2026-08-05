@@ -255,6 +255,9 @@ test("repository picker uses signed-in GitHub visibility and exposes app install
   assert.match(script, /"Import selected"/);
   assert.match(script, /"Install selected"/);
   assert.match(script, /fields\.repository_ids/);
+  assert.match(script, /function submitImportAction\(repositories\)/);
+  assert.match(script, /import_only: "true"/);
+  assert.match(script, /repository\.state === "existing_installation"[\s\S]*submitImportAction\(selected\)/);
   assert.match(script, /function confirmSelectedRepositories\(\)/);
   assert.match(script, /Update GitHub App access/);
   assert.match(script, /function refreshGitHubAccess\(\)/);
