@@ -10,11 +10,11 @@ readme = "README.md"
 description = "Strict, fail-closed GitHub Actions workflow frontend for Runtrue"
 
 [dependencies]
-runtrue-compiler = { git = "https://github.com/runtrue/runtrue", rev = "5b6bcd9ae1582d4da36b1025cf8b9601b81d2de2" }
-runtrue-lock = { git = "https://github.com/runtrue/runtrue", rev = "5b6bcd9ae1582d4da36b1025cf8b9601b81d2de2" }
-runtrue-model = { git = "https://github.com/runtrue/runtrue", rev = "5b6bcd9ae1582d4da36b1025cf8b9601b81d2de2" }
-runtrue-workflow-frontend = { git = "https://github.com/runtrue/runtrue", rev = "5b6bcd9ae1582d4da36b1025cf8b9601b81d2de2" }
-runtrue-workflow-ast = { git = "https://github.com/runtrue/runtrue", rev = "5b6bcd9ae1582d4da36b1025cf8b9601b81d2de2" }
+runtrue-compiler = { git = "https://github.com/runtrue/runtrue", rev = "af4547eb93453a9bc3c305107969ec67e955cfb5" }
+runtrue-lock = { git = "https://github.com/runtrue/runtrue", rev = "af4547eb93453a9bc3c305107969ec67e955cfb5" }
+runtrue-model = { git = "https://github.com/runtrue/runtrue", rev = "af4547eb93453a9bc3c305107969ec67e955cfb5" }
+runtrue-workflow-frontend = { git = "https://github.com/runtrue/runtrue", rev = "af4547eb93453a9bc3c305107969ec67e955cfb5" }
+runtrue-workflow-ast = { git = "https://github.com/runtrue/runtrue", rev = "af4547eb93453a9bc3c305107969ec67e955cfb5" }
 base64ct = { version = "=1.6.0", features = ["std"] }
 hex = "=0.4.3"
 hmac = "=0.12.1"
@@ -48,34 +48,34 @@ license = "Apache-2.0"
 rust-version = "1.94"
 
 [workspace.dependencies]
-runtrue-artifacts = { git = "https://github.com/runtrue/runtrue", rev = "5b6bcd9ae1582d4da36b1025cf8b9601b81d2de2" }
-runtrue-autoscaler = { git = "https://github.com/runtrue/runtrue", rev = "5b6bcd9ae1582d4da36b1025cf8b9601b81d2de2" }
-runtrue-auth = { git = "https://github.com/runtrue/runtrue", rev = "5b6bcd9ae1582d4da36b1025cf8b9601b81d2de2" }
-runtrue-audit = { git = "https://github.com/runtrue/runtrue", rev = "5b6bcd9ae1582d4da36b1025cf8b9601b81d2de2" }
-runtrue-cache = { git = "https://github.com/runtrue/runtrue", rev = "5b6bcd9ae1582d4da36b1025cf8b9601b81d2de2" }
-runtrue-attest = { git = "https://github.com/runtrue/runtrue", rev = "5b6bcd9ae1582d4da36b1025cf8b9601b81d2de2" }
-runtrue-compiler = { git = "https://github.com/runtrue/runtrue", rev = "5b6bcd9ae1582d4da36b1025cf8b9601b81d2de2" }
-runtrue-control-plane = { git = "https://github.com/runtrue/runtrue", rev = "5b6bcd9ae1582d4da36b1025cf8b9601b81d2de2" }
-runtrue-git = { git = "https://github.com/runtrue/runtrue", rev = "5b6bcd9ae1582d4da36b1025cf8b9601b81d2de2" }
+runtrue-artifacts = { git = "https://github.com/runtrue/runtrue", rev = "af4547eb93453a9bc3c305107969ec67e955cfb5" }
+runtrue-autoscaler = { git = "https://github.com/runtrue/runtrue", rev = "af4547eb93453a9bc3c305107969ec67e955cfb5" }
+runtrue-auth = { git = "https://github.com/runtrue/runtrue", rev = "af4547eb93453a9bc3c305107969ec67e955cfb5" }
+runtrue-audit = { git = "https://github.com/runtrue/runtrue", rev = "af4547eb93453a9bc3c305107969ec67e955cfb5" }
+runtrue-cache = { git = "https://github.com/runtrue/runtrue", rev = "af4547eb93453a9bc3c305107969ec67e955cfb5" }
+runtrue-attest = { git = "https://github.com/runtrue/runtrue", rev = "af4547eb93453a9bc3c305107969ec67e955cfb5" }
+runtrue-compiler = { git = "https://github.com/runtrue/runtrue", rev = "af4547eb93453a9bc3c305107969ec67e955cfb5" }
+runtrue-control-plane = { git = "https://github.com/runtrue/runtrue", rev = "af4547eb93453a9bc3c305107969ec67e955cfb5" }
+runtrue-git = { git = "https://github.com/runtrue/runtrue", rev = "af4547eb93453a9bc3c305107969ec67e955cfb5" }
 runtrue-gha-import = { path = "." }
-runtrue-lifecycle = { git = "https://github.com/runtrue/runtrue", rev = "5b6bcd9ae1582d4da36b1025cf8b9601b81d2de2" }
-runtrue-lock = { git = "https://github.com/runtrue/runtrue", rev = "5b6bcd9ae1582d4da36b1025cf8b9601b81d2de2" }
-runtrue-model = { git = "https://github.com/runtrue/runtrue", rev = "5b6bcd9ae1582d4da36b1025cf8b9601b81d2de2" }
-runtrue-oidc = { git = "https://github.com/runtrue/runtrue", rev = "5b6bcd9ae1582d4da36b1025cf8b9601b81d2de2" }
-runtrue-policy = { git = "https://github.com/runtrue/runtrue", rev = "5b6bcd9ae1582d4da36b1025cf8b9601b81d2de2" }
-runtrue-protocol = { git = "https://github.com/runtrue/runtrue", rev = "5b6bcd9ae1582d4da36b1025cf8b9601b81d2de2" }
-runtrue-replay = { git = "https://github.com/runtrue/runtrue", rev = "5b6bcd9ae1582d4da36b1025cf8b9601b81d2de2" }
-runtrue-runner = { git = "https://github.com/runtrue/runtrue", rev = "5b6bcd9ae1582d4da36b1025cf8b9601b81d2de2" }
-runtrue-runner-core = { git = "https://github.com/runtrue/runtrue", rev = "5b6bcd9ae1582d4da36b1025cf8b9601b81d2de2" }
-runtrue-scheduler = { git = "https://github.com/runtrue/runtrue", rev = "5b6bcd9ae1582d4da36b1025cf8b9601b81d2de2" }
-runtrue-scm = { git = "https://github.com/runtrue/runtrue", rev = "5b6bcd9ae1582d4da36b1025cf8b9601b81d2de2" }
-runtrue-secrets = { git = "https://github.com/runtrue/runtrue", rev = "5b6bcd9ae1582d4da36b1025cf8b9601b81d2de2" }
-runtrue-storage = { git = "https://github.com/runtrue/runtrue", rev = "5b6bcd9ae1582d4da36b1025cf8b9601b81d2de2" }
-runtrue-trusted-planner = { git = "https://github.com/runtrue/runtrue", rev = "5b6bcd9ae1582d4da36b1025cf8b9601b81d2de2" }
-runtrue-update = { git = "https://github.com/runtrue/runtrue", rev = "5b6bcd9ae1582d4da36b1025cf8b9601b81d2de2" }
-runtrue-workflow-ast = { git = "https://github.com/runtrue/runtrue", rev = "5b6bcd9ae1582d4da36b1025cf8b9601b81d2de2" }
-runtrue-workflow-frontend = { git = "https://github.com/runtrue/runtrue", rev = "5b6bcd9ae1582d4da36b1025cf8b9601b81d2de2" }
-runtrue-workflow-ir = { git = "https://github.com/runtrue/runtrue", rev = "5b6bcd9ae1582d4da36b1025cf8b9601b81d2de2" }
+runtrue-lifecycle = { git = "https://github.com/runtrue/runtrue", rev = "af4547eb93453a9bc3c305107969ec67e955cfb5" }
+runtrue-lock = { git = "https://github.com/runtrue/runtrue", rev = "af4547eb93453a9bc3c305107969ec67e955cfb5" }
+runtrue-model = { git = "https://github.com/runtrue/runtrue", rev = "af4547eb93453a9bc3c305107969ec67e955cfb5" }
+runtrue-oidc = { git = "https://github.com/runtrue/runtrue", rev = "af4547eb93453a9bc3c305107969ec67e955cfb5" }
+runtrue-policy = { git = "https://github.com/runtrue/runtrue", rev = "af4547eb93453a9bc3c305107969ec67e955cfb5" }
+runtrue-protocol = { git = "https://github.com/runtrue/runtrue", rev = "af4547eb93453a9bc3c305107969ec67e955cfb5" }
+runtrue-replay = { git = "https://github.com/runtrue/runtrue", rev = "af4547eb93453a9bc3c305107969ec67e955cfb5" }
+runtrue-runner = { git = "https://github.com/runtrue/runtrue", rev = "af4547eb93453a9bc3c305107969ec67e955cfb5" }
+runtrue-runner-core = { git = "https://github.com/runtrue/runtrue", rev = "af4547eb93453a9bc3c305107969ec67e955cfb5" }
+runtrue-scheduler = { git = "https://github.com/runtrue/runtrue", rev = "af4547eb93453a9bc3c305107969ec67e955cfb5" }
+runtrue-scm = { git = "https://github.com/runtrue/runtrue", rev = "af4547eb93453a9bc3c305107969ec67e955cfb5" }
+runtrue-secrets = { git = "https://github.com/runtrue/runtrue", rev = "af4547eb93453a9bc3c305107969ec67e955cfb5" }
+runtrue-storage = { git = "https://github.com/runtrue/runtrue", rev = "af4547eb93453a9bc3c305107969ec67e955cfb5" }
+runtrue-trusted-planner = { git = "https://github.com/runtrue/runtrue", rev = "af4547eb93453a9bc3c305107969ec67e955cfb5" }
+runtrue-update = { git = "https://github.com/runtrue/runtrue", rev = "af4547eb93453a9bc3c305107969ec67e955cfb5" }
+runtrue-workflow-ast = { git = "https://github.com/runtrue/runtrue", rev = "af4547eb93453a9bc3c305107969ec67e955cfb5" }
+runtrue-workflow-frontend = { git = "https://github.com/runtrue/runtrue", rev = "af4547eb93453a9bc3c305107969ec67e955cfb5" }
+runtrue-workflow-ir = { git = "https://github.com/runtrue/runtrue", rev = "af4547eb93453a9bc3c305107969ec67e955cfb5" }
 axum = "=0.6.20"
 base64ct = { version = "=1.6.0", features = ["std"] }
 chacha20poly1305 = "=0.10.1"

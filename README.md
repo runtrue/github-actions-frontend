@@ -15,7 +15,7 @@ and provenance before planning or execution.
 ## Compatibility
 
 This release is built against Runtrue core revision
-`bcaba397cc04095ac7dd45fbf177339e5efb6846`. All Runtrue packages in
+`af4547eb93453a9bc3c305107969ec67e955cfb5`. All Runtrue packages in
 `Cargo.toml` use that one exact revision so the frontend contract and workflow
 types have a single reviewed source.
 
