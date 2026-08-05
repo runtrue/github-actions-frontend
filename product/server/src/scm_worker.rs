@@ -1437,15 +1437,22 @@ impl RepositoryActionResolver for GitHubRepositoryActionResolver {
         }
         let declaration = frontend
             .parse_action_descriptor(request, &descriptors)
-            .map_err(|_| RepositoryActionResolveError::Rejected)?;
+            .map_err(|error| {
+                eprintln!("repository action `{reference}` descriptor rejected: {error}");
+                RepositoryActionResolveError::Rejected
+            })?;
         if declaration.source_reference() != reference {
             return Err(RepositoryActionResolveError::Rejected);
         }
-        let metadata_digest = ContentDigest::sha256(
-            descriptors
-                .selected_descriptor(&declaration)
-                .map_err(|_| RepositoryActionResolveError::Rejected)?,
-        );
+        let metadata_digest =
+            ContentDigest::sha256(descriptors.selected_descriptor(&declaration).map_err(
+                |error| {
+                    eprintln!(
+                        "repository action `{reference}` descriptor selection rejected: {error}"
+                    );
+                    RepositoryActionResolveError::Rejected
+                },
+            )?);
         let program = match declaration.program() {
             SourceActionProgramDeclaration::ContainerBuild {
                 build_file,
@@ -1456,20 +1463,28 @@ impl RepositoryActionResolver for GitHubRepositoryActionResolver {
                 fetched
                     .repository
                     .read_blob(commit, &dockerfile)
-                    .map_err(|_| RepositoryActionResolveError::Rejected)?;
+                    .map_err(|error| {
+                        eprintln!("repository action `{reference}` build file rejected: {error}");
+                        RepositoryActionResolveError::Rejected
+                    })?;
                 let builder = self
                     .builder
                     .as_ref()
                     .ok_or(RepositoryActionResolveError::Rejected)?;
-                let image = builder.build(RepositoryActionBuildRequest {
-                    tenant_id,
-                    repository_id: &repository_id,
-                    reference,
-                    commit,
-                    repository: &fetched.repository,
-                    metadata_digest: &metadata_digest,
-                    dockerfile: &dockerfile,
-                })?;
+                let image = builder
+                    .build(RepositoryActionBuildRequest {
+                        tenant_id,
+                        repository_id: &repository_id,
+                        reference,
+                        commit,
+                        repository: &fetched.repository,
+                        metadata_digest: &metadata_digest,
+                        dockerfile: &dockerfile,
+                    })
+                    .map_err(|error| {
+                        eprintln!("repository action `{reference}` build rejected: {error}");
+                        error
+                    })?;
                 ResolvedProgram::container(image, entrypoint.clone(), arguments.clone())
             }
             SourceActionProgramDeclaration::Component {
@@ -1483,22 +1498,32 @@ impl RepositoryActionResolver for GitHubRepositoryActionResolver {
                 interface.clone(),
             ),
         }
-        .map_err(|_| RepositoryActionResolveError::Rejected)?;
+        .map_err(|error| {
+            eprintln!("repository action `{reference}` program rejected: {error}");
+            RepositoryActionResolveError::Rejected
+        })?;
         let mut action = ResolvedSourceAction::new(program);
         for (name, input) in declaration.inputs() {
-            action
-                .insert_input(name, input.clone())
-                .map_err(|_| RepositoryActionResolveError::Rejected)?;
+            action.insert_input(name, input.clone()).map_err(|error| {
+                eprintln!("repository action `{reference}` input rejected: {error}");
+                RepositoryActionResolveError::Rejected
+            })?;
         }
         for destination in declaration.network_destinations() {
             action
                 .insert_network_destination(destination.clone())
-                .map_err(|_| RepositoryActionResolveError::Rejected)?;
+                .map_err(|error| {
+                    eprintln!(
+                        "repository action `{reference}` network capability rejected: {error}"
+                    );
+                    RepositoryActionResolveError::Rejected
+                })?;
         }
         for secret in declaration.secrets() {
-            action
-                .insert_secret(secret.clone())
-                .map_err(|_| RepositoryActionResolveError::Rejected)?;
+            action.insert_secret(secret.clone()).map_err(|error| {
+                eprintln!("repository action `{reference}` secret capability rejected: {error}");
+                RepositoryActionResolveError::Rejected
+            })?;
         }
         Ok(PreparedRepositoryAction {
             reference: reference.to_owned(),
