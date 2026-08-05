@@ -88,7 +88,7 @@ Once you have the design read (Section 0) and dials (Section 1), pick the right 
 |---|---|---|
 | Microsoft / enterprise SaaS / dashboards | `@fluentui/react-components` or `@fluentui/web-components` | Official Fluent UI, Microsoft tokens, accessibility done |
 | Google-ish UI, Material-flavored product | `@material/web` + Material 3 tokens | Official, theme-able via Material Theming |
-| IBM-style B2B / enterprise analytics | `@carbon/react` + `@carbon/styles` | Official Carbon, mature data-density patterns |
+| Data-dense B2B / enterprise analytics | `@carbon/react` + `@carbon/styles` | Official Carbon, mature data-density patterns |
 | Shopify app surfaces | `polaris.js` web components / Polaris React | Required for Shopify admin UI |
 | Atlassian / Jira-style product | `@atlaskit/*` + `@atlaskit/tokens` | Official Atlassian DS |
 | GitHub-style devtool / community page | `@primer/css` or `@primer/react-brand` | Official Primer; Brand variant for marketing |
@@ -168,7 +168,7 @@ LLMs default to clichés. Override these defaults proactively. Each rule has a c
 * **Sans font choice:**
   * **Discouraged as default:** `Inter`. Pick `Geist`, `Outfit`, `Cabinet Grotesk`, `Satoshi`, or a brand-appropriate serif first.
   * **Override:** Inter is acceptable when the user explicitly asks for a neutral / standard / Linear-style feel, or when the brief is a public-sector / accessibility-first site.
-* **Pairings to know:** `Geist` + `Geist Mono`, `Satoshi` + `JetBrains Mono`, `Cabinet Grotesk` + `Inter Tight`, `GT America` + `IBM Plex Mono`.
+* **Pairings to know:** `Geist` + `Geist Mono`, `Satoshi` + `JetBrains Mono`, `Cabinet Grotesk` + `Inter Tight`, `GT America` + `Roboto Mono`.
 
 * **SERIF DISCIPLINE (VERY DISCOURAGED AS DEFAULT):**
   * Serif is **very discouraged as the default font for any project.** "It feels creative / premium / editorial" is NOT a reason to reach for serif. The agent's default mental model that "creative brief = serif" is the single most-tested AI tell in production rounds.
@@ -996,7 +996,7 @@ npm install @fluentui/react-components
 # Fluent UI Web Components (framework-free)
 npm install @fluentui/web-components @fluentui/tokens
 
-# IBM Carbon
+# Carbon Design System
 npm install @carbon/react @carbon/styles
 
 # Radix Themes

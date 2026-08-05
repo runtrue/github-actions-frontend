@@ -808,14 +808,17 @@ async fn configured_data_plane_is_reached_only_over_enrolled_mtls_identity() {
     );
     assert!(terminal_check.render_markdown);
 
-    tokio::time::timeout(Duration::from_secs(5), async {
+    let completion_heartbeat = control
+        .runner(&enrolled.runner_id)
+        .unwrap()
+        .runner
+        .last_heartbeat_unix_ms;
+    tokio::time::timeout(Duration::from_secs(10), async {
         loop {
-            if control
-                .runner(&enrolled.runner_id)
-                .unwrap()
-                .runner
-                .locality
-                .contains(&manifest_digest)
+            let runner = control.runner(&enrolled.runner_id).unwrap().runner;
+            if runner.active_jobs == 0
+                && runner.last_heartbeat_unix_ms > completion_heartbeat
+                && runner.locality.contains(&manifest_digest)
             {
                 break;
             }
@@ -823,7 +826,7 @@ async fn configured_data_plane_is_reached_only_over_enrolled_mtls_identity() {
         }
     })
     .await
-    .expect("runner must advertise the verified source snapshot");
+    .expect("runner must report idle after advertising the verified source snapshot");
     let source_transfers_before: i64 = rusqlite::Connection::open(&database)
         .unwrap()
         .query_row(

@@ -34,7 +34,7 @@ Typography is the primary structural and decorative infrastructure. Imagery is s
 
 ### 3.2 Micro-Typography (Data & Telemetry)
 *   **Classification:** Monospace / Technical Sans.
-*   **Optimal Web Fonts:** JetBrains Mono, IBM Plex Mono, Space Mono, VT323, Courier Prime.
+*   **Optimal Web Fonts:** JetBrains Mono, Space Mono, VT323, Courier Prime.
 *   **Implementation Parameters:**
     *   **Scale:** Fixed and small (`10px` to `14px` / `0.7rem` to `0.875rem`).
     *   **Tracking:** Generous (`0.05em` to `0.1em`) to simulate mechanical typewriter spacing or terminal matrices.

@@ -100,7 +100,7 @@ const KNOWN_SERIF_FONTS = new Set([
   'tiempos', 'tiempos headline', 'tiempos text',
   'lora', 'vollkorn', 'spectral',
   'source serif pro', 'source serif 4', 'source serif',
-  'ibm plex serif', 'merriweather',
+  'merriweather',
   'libre caslon', 'libre baskerville', 'baskerville',
   'georgia', 'times new roman', 'times',
   'dm serif display', 'dm serif text',
