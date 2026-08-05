@@ -20,14 +20,19 @@ COPY --from=planner /src/recipe.json recipe.json
 RUN --mount=type=cache,id=runtrue-gha-cargo-registry-v1,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=runtrue-gha-cargo-git-v1,target=/usr/local/cargo/git,sharing=locked \
     CARGO_NET_GIT_FETCH_WITH_CLI=true \
-      cargo chef cook --locked --release --package runtrue-server --bin runtrue-server --bin runtrue-action-builder --recipe-path recipe.json
+      cargo chef cook --locked --release --package runtrue-server \
+        --bin runtrue-server --bin runtrue-action-builder \
+        --bin runtrue-action-admitter --recipe-path recipe.json
 COPY . .
 RUN --mount=type=cache,id=runtrue-gha-cargo-registry-v1,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=runtrue-gha-cargo-git-v1,target=/usr/local/cargo/git,sharing=locked \
     CARGO_NET_GIT_FETCH_WITH_CLI=true \
-      cargo build --locked --release -p runtrue-server --bin runtrue-server --bin runtrue-action-builder; \
+      cargo build --locked --release -p runtrue-server \
+        --bin runtrue-server --bin runtrue-action-builder \
+        --bin runtrue-action-admitter; \
     install -D -m 0555 target/release/runtrue-server /out/runtrue-server; \
-    install -D -m 0555 target/release/runtrue-action-builder /out/runtrue-action-builder
+    install -D -m 0555 target/release/runtrue-action-builder /out/runtrue-action-builder; \
+    install -D -m 0555 target/release/runtrue-action-admitter /out/runtrue-action-admitter
 
 FROM ${RUST_IMAGE} AS scm-tools
 RUN set -eux; \
@@ -64,9 +69,12 @@ RUN groupadd --gid 10001 --system runtrue && \
     install -d -o 10001 -g 10001 -m 0700 /var/lib/runtrue/server
 COPY --from=build --chown=0:0 /out/runtrue-server /usr/local/bin/runtrue-server
 COPY --from=build --chown=0:0 /out/runtrue-action-builder /usr/local/bin/runtrue-action-builder
+COPY --from=build --chown=0:0 /out/runtrue-action-admitter /usr/local/bin/runtrue-action-admitter
 COPY --from=scm-tools --chown=0:0 /out/ /
 COPY --chown=0:0 product/server/healthcheck.sh /usr/local/bin/runtrue-healthcheck
-RUN chmod 0555 /usr/local/bin/runtrue-server /usr/local/bin/runtrue-action-builder /usr/local/bin/runtrue-healthcheck /usr/bin/git && \
+RUN chmod 0555 /usr/local/bin/runtrue-server /usr/local/bin/runtrue-action-builder \
+      /usr/local/bin/runtrue-action-admitter \
+      /usr/local/bin/runtrue-healthcheck /usr/bin/git && \
     /usr/bin/git --version
 USER 10001:10001
 WORKDIR /var/lib/runtrue/server

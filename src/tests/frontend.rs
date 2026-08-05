@@ -29,7 +29,7 @@ fn github_frontend_is_deterministic_and_binds_translation_identity() {
         GithubActionsFrontend.frontend_id(),
         "runtrue.github-actions"
     );
-    assert_eq!(GithubActionsFrontend.frontend_generation(), 3);
+    assert_eq!(GithubActionsFrontend.frontend_generation(), 4);
     assert!(first.native_yaml.contains(
         "registry.example/runtrue-ci@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     ));

@@ -247,6 +247,79 @@ fn full_commit_repository_docker_action_has_exact_image_lock_and_arguments() {
 }
 
 #[test]
+fn repository_docker_action_carries_runtime_requirements_and_issue_comment_guard() {
+    let reference = format!("ci/ai-review@{}", "a".repeat(40));
+    let image = format!("containers.example/ai-review@sha256:{}", "b".repeat(64));
+    let source = format!(
+        r#"on:
+  issue_comment:
+    types: [created]
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+jobs:
+  review:
+    if: github.event.issue.pull_request && github.event.comment.body == '/ai-review'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: {reference}
+        with:
+          github-token: ${{{{ github.token }}}}
+"#
+    );
+    let mut action = runtrue_workflow_frontend::ResolvedSourceAction::new(
+        runtrue_workflow_frontend::ResolvedProgram::container(image.clone(), None, None).unwrap(),
+    );
+    action
+        .insert_input(
+            "github-token",
+            runtrue_workflow_frontend::ResolvedActionInput::new(true, None).unwrap(),
+        )
+        .unwrap();
+    action
+        .insert_network_destination(
+            runtrue_workflow_frontend::ResolvedActionNetworkDestination::new(
+                "api.example.test",
+                443,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    action
+        .insert_secret(
+            runtrue_workflow_frontend::ResolvedActionSecret::new(
+                "AI_API_KEY",
+                "inference",
+                "INPUT_AI_API_KEY_FILE",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+    let result = import_github_actions_with_options(
+        &source,
+        "ai-review.yml",
+        resolved_options(reference.clone(), action),
+    )
+    .unwrap();
+    assert!(result.report.compatible, "{}", result.report.render_human());
+    assert!(result.report.compiler_validated);
+    let yaml = result.native_yaml.as_deref().unwrap();
+    assert!(yaml.contains(
+        "event.issue_comment.issue_is_pull_request && event.issue_comment.body == \"/ai-review\""
+    ));
+    assert!(yaml.contains("host: api.example.test"));
+    assert!(yaml.contains("name: AI_API_KEY"));
+    assert!(yaml.contains("purpose: inference"));
+    assert!(yaml.contains("INPUT_AI_API_KEY_FILE: /workspace/.runtrue-runtime/secrets/AI_API_KEY"));
+    assert!(yaml.contains("RUNTRUE_EVENT_PATH: /workspace/.runtrue-runtime/event.json"));
+    let lock = LockFile::parse(result.lockfile_toml.as_deref().unwrap().as_bytes()).unwrap();
+    assert_eq!(lock.images()[0].source(), reference);
+    assert_eq!(lock.images()[0].resolved(), image);
+}
+
+#[test]
 fn repository_action_inputs_fail_closed_and_apply_defaults() {
     let reference = format!("owner/action@{}", "a".repeat(40));
     let image = format!("registry.example/action@sha256:{}", "b".repeat(64));

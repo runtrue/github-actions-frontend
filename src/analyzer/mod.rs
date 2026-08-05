@@ -262,6 +262,12 @@ impl Analyzer {
             let context = CompileContext {
                 workflow_path: self.source_name.clone(),
                 lockfile: parsed_lock,
+                event: serde_json::json!({
+                    "issue_comment": {
+                        "body": "/ai-review",
+                        "issue_is_pull_request": true
+                    }
+                }),
                 ..CompileContext::default()
             };
             Compiler::default()

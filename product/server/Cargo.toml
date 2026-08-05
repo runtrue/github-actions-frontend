@@ -19,6 +19,10 @@ name = "runtrue-action-builder"
 path = "src/action_builder_main.rs"
 
 [[bin]]
+name = "runtrue-action-admitter"
+path = "src/action_admitter_main.rs"
+
+[[bin]]
 name = "runtrue-db-transfer"
 path = "src/db_transfer_main.rs"
 

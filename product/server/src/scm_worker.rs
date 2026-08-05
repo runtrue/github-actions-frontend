@@ -43,8 +43,9 @@ use runtrue_trusted_planner::{
     TrustedPlannerError, DEFAULT_LOCKFILE_PATH,
 };
 use runtrue_workflow_frontend::{
-    ResolvedActionInput, ResolvedProgram, ResolvedProgramRef, ResolvedSourceAction,
-    SourceActionResolutionRequest, WorkflowFrontendOptions, WorkflowSourceFrontend,
+    ResolvedActionInput, ResolvedActionNetworkDestination, ResolvedActionSecret, ResolvedProgram,
+    ResolvedProgramRef, ResolvedSourceAction, SourceActionResolutionRequest,
+    WorkflowFrontendOptions, WorkflowSourceFrontend,
 };
 #[cfg(feature = "github-actions")]
 use runtrue_workflow_frontend::{SourceActionDescriptors, SourceActionProgramDeclaration};
@@ -87,6 +88,10 @@ const GITHUB_INSTALLATION_PAGE_SIZE: usize = 100;
 struct DurableResolvedAction {
     program: DurableResolvedProgram,
     inputs: BTreeMap<String, DurableResolvedInput>,
+    #[serde(default)]
+    network: Vec<DurableResolvedNetworkDestination>,
+    #[serde(default)]
+    secrets: Vec<DurableResolvedSecret>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -110,6 +115,21 @@ enum DurableResolvedProgram {
 struct DurableResolvedInput {
     required: bool,
     default: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DurableResolvedNetworkDestination {
+    host: String,
+    port: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DurableResolvedSecret {
+    name: String,
+    purpose: String,
+    file_env: String,
 }
 
 fn durable_resolved_actions(
@@ -152,9 +172,29 @@ fn durable_resolved_actions(
                     )
                 })
                 .collect();
+            let network = action
+                .network_destinations()
+                .map(|destination| DurableResolvedNetworkDestination {
+                    host: destination.host().to_owned(),
+                    port: destination.port(),
+                })
+                .collect();
+            let secrets = action
+                .secrets()
+                .map(|secret| DurableResolvedSecret {
+                    name: secret.name().to_owned(),
+                    purpose: secret.purpose().to_owned(),
+                    file_env: secret.file_env().to_owned(),
+                })
+                .collect();
             (
                 reference.to_owned(),
-                DurableResolvedAction { program, inputs },
+                DurableResolvedAction {
+                    program,
+                    inputs,
+                    network,
+                    secrets,
+                },
             )
         })
         .collect::<BTreeMap<_, _>>();
@@ -191,6 +231,36 @@ fn restore_resolved_actions(
             resolved.insert_input(name, input).map_err(|_| {
                 TaskFailure::terminal("durable repository-action inputs are invalid")
             })?;
+        }
+        for destination in action.network {
+            resolved
+                .insert_network_destination(
+                    ResolvedActionNetworkDestination::new(destination.host, destination.port)
+                        .map_err(|_| {
+                            TaskFailure::terminal(
+                                "durable repository-action network destination is invalid",
+                            )
+                        })?,
+                )
+                .map_err(|_| {
+                    TaskFailure::terminal(
+                        "durable repository-action network destinations are invalid",
+                    )
+                })?;
+        }
+        for secret in action.secrets {
+            resolved
+                .insert_secret(
+                    ResolvedActionSecret::new(secret.name, secret.purpose, secret.file_env)
+                        .map_err(|_| {
+                            TaskFailure::terminal(
+                                "durable repository-action secret declaration is invalid",
+                            )
+                        })?,
+                )
+                .map_err(|_| {
+                    TaskFailure::terminal("durable repository-action secrets are invalid")
+                })?;
         }
         options
             .insert_resolved_action(reference, resolved)
@@ -1367,15 +1437,22 @@ impl RepositoryActionResolver for GitHubRepositoryActionResolver {
         }
         let declaration = frontend
             .parse_action_descriptor(request, &descriptors)
-            .map_err(|_| RepositoryActionResolveError::Rejected)?;
+            .map_err(|error| {
+                eprintln!("repository action `{reference}` descriptor rejected: {error}");
+                RepositoryActionResolveError::Rejected
+            })?;
         if declaration.source_reference() != reference {
             return Err(RepositoryActionResolveError::Rejected);
         }
-        let metadata_digest = ContentDigest::sha256(
-            descriptors
-                .selected_descriptor(&declaration)
-                .map_err(|_| RepositoryActionResolveError::Rejected)?,
-        );
+        let metadata_digest =
+            ContentDigest::sha256(descriptors.selected_descriptor(&declaration).map_err(
+                |error| {
+                    eprintln!(
+                        "repository action `{reference}` descriptor selection rejected: {error}"
+                    );
+                    RepositoryActionResolveError::Rejected
+                },
+            )?);
         let program = match declaration.program() {
             SourceActionProgramDeclaration::ContainerBuild {
                 build_file,
@@ -1386,20 +1463,28 @@ impl RepositoryActionResolver for GitHubRepositoryActionResolver {
                 fetched
                     .repository
                     .read_blob(commit, &dockerfile)
-                    .map_err(|_| RepositoryActionResolveError::Rejected)?;
+                    .map_err(|error| {
+                        eprintln!("repository action `{reference}` build file rejected: {error}");
+                        RepositoryActionResolveError::Rejected
+                    })?;
                 let builder = self
                     .builder
                     .as_ref()
                     .ok_or(RepositoryActionResolveError::Rejected)?;
-                let image = builder.build(RepositoryActionBuildRequest {
-                    tenant_id,
-                    repository_id: &repository_id,
-                    reference,
-                    commit,
-                    repository: &fetched.repository,
-                    metadata_digest: &metadata_digest,
-                    dockerfile: &dockerfile,
-                })?;
+                let image = builder
+                    .build(RepositoryActionBuildRequest {
+                        tenant_id,
+                        repository_id: &repository_id,
+                        reference,
+                        commit,
+                        repository: &fetched.repository,
+                        metadata_digest: &metadata_digest,
+                        dockerfile: &dockerfile,
+                    })
+                    .map_err(|error| {
+                        eprintln!("repository action `{reference}` build rejected: {error}");
+                        error
+                    })?;
                 ResolvedProgram::container(image, entrypoint.clone(), arguments.clone())
             }
             SourceActionProgramDeclaration::Component {
@@ -1413,12 +1498,32 @@ impl RepositoryActionResolver for GitHubRepositoryActionResolver {
                 interface.clone(),
             ),
         }
-        .map_err(|_| RepositoryActionResolveError::Rejected)?;
+        .map_err(|error| {
+            eprintln!("repository action `{reference}` program rejected: {error}");
+            RepositoryActionResolveError::Rejected
+        })?;
         let mut action = ResolvedSourceAction::new(program);
         for (name, input) in declaration.inputs() {
+            action.insert_input(name, input.clone()).map_err(|error| {
+                eprintln!("repository action `{reference}` input rejected: {error}");
+                RepositoryActionResolveError::Rejected
+            })?;
+        }
+        for destination in declaration.network_destinations() {
             action
-                .insert_input(name, input.clone())
-                .map_err(|_| RepositoryActionResolveError::Rejected)?;
+                .insert_network_destination(destination.clone())
+                .map_err(|error| {
+                    eprintln!(
+                        "repository action `{reference}` network capability rejected: {error}"
+                    );
+                    RepositoryActionResolveError::Rejected
+                })?;
+        }
+        for secret in declaration.secrets() {
+            action.insert_secret(secret.clone()).map_err(|error| {
+                eprintln!("repository action `{reference}` secret capability rejected: {error}");
+                RepositoryActionResolveError::Rejected
+            })?;
         }
         Ok(PreparedRepositoryAction {
             reference: reference.to_owned(),

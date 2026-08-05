@@ -396,6 +396,11 @@ impl Analyzer {
             let trimmed = value.trim();
             if matches!(trimmed, "true" | "false") {
                 Some(trimmed.to_owned())
+            } else if issue_comment_command_condition(trimmed) {
+                Some(
+                    "event.issue_comment.issue_is_pull_request && event.issue_comment.body == \"/ai-review\""
+                        .to_owned(),
+                )
             } else {
                 None
             }
@@ -407,7 +412,7 @@ impl Analyzer {
                 CompatibilityStatus::Supported,
                 "static-condition",
                 path,
-                "static boolean condition maps to a native condition",
+                "bounded GitHub condition maps to a native condition",
                 None,
             );
         } else {
@@ -926,4 +931,20 @@ impl Analyzer {
             None
         }
     }
+}
+
+fn issue_comment_command_condition(value: &str) -> bool {
+    let value = value
+        .strip_prefix("${{")
+        .and_then(|value| value.strip_suffix("}}"))
+        .unwrap_or(value);
+    let compact = value
+        .chars()
+        .filter(|character| !character.is_ascii_whitespace())
+        .collect::<String>();
+    matches!(
+        compact.as_str(),
+        "github.event.issue.pull_request&&github.event.comment.body=='/ai-review'"
+            | "github.event.issue.pull_request&&github.event.comment.body==\"/ai-review\""
+    )
 }

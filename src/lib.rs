@@ -20,10 +20,11 @@ use github::GithubWorkflow;
 #[cfg(test)]
 use runtrue_workflow_ast as ast;
 use runtrue_workflow_frontend::{
-    PreparedWorkflowSource, SourceActionDeclaration, SourceActionDescriptors,
-    SourceActionProgramDeclaration, SourceActionResolutionRequest, SourceActionResolutionRequests,
-    WorkflowFrontendError, WorkflowFrontendErrorKind, WorkflowFrontendOptions,
-    WorkflowFrontendReport, WorkflowSourceFrontend,
+    PreparedWorkflowSource, ResolvedActionNetworkDestination, ResolvedActionSecret,
+    SourceActionDeclaration, SourceActionDescriptors, SourceActionProgramDeclaration,
+    SourceActionResolutionRequest, SourceActionResolutionRequests, WorkflowFrontendError,
+    WorkflowFrontendErrorKind, WorkflowFrontendOptions, WorkflowFrontendReport,
+    WorkflowSourceFrontend,
 };
 use strict_yaml::validate_strict_yaml;
 
@@ -34,7 +35,7 @@ pub use report::{
 };
 pub use repository_action::{
     parse_repository_action_metadata, parse_runtrue_repository_action_metadata,
-    RepositoryActionMetadata, RuntrueRepositoryActionMetadata,
+    RepositoryActionMetadata, RuntrueRepositoryActionMetadata, RuntrueRepositoryActionProgram,
 };
 pub use source::*;
 
@@ -53,7 +54,7 @@ impl WorkflowSourceFrontend for GithubActionsFrontend {
     }
 
     fn frontend_generation(&self) -> u32 {
-        3
+        4
     }
 
     fn discovery_roots(&self) -> &'static [&'static str] {
@@ -117,42 +118,77 @@ impl WorkflowSourceFrontend for GithubActionsFrontend {
             ));
         }
 
-        let mut declaration = if descriptor_path == "runtrue-action.yml" {
-            let metadata =
-                parse_runtrue_repository_action_metadata(bytes).map_err(frontend_source_error)?;
-            SourceActionDeclaration::new(
-                request.source_reference(),
-                descriptor_path,
-                SourceActionProgramDeclaration::Component {
-                    reference: metadata.component,
-                    signature_identity: metadata.signature_identity,
-                    interface: metadata.wit_world,
-                },
-            )
-            .map(|declaration| (declaration, metadata.inputs))
-        } else {
-            let metadata =
-                parse_repository_action_metadata(bytes).map_err(frontend_source_error)?;
-            SourceActionDeclaration::new(
-                request.source_reference(),
-                descriptor_path,
-                SourceActionProgramDeclaration::ContainerBuild {
-                    build_file: metadata.dockerfile,
-                    entrypoint: metadata.entrypoint,
-                    arguments: metadata.args,
-                },
-            )
-            .map(|declaration| (declaration, metadata.inputs))
-        }
-        .map_err(|error| frontend_invalid_source(error.to_string()))?;
+        let (mut declaration, inputs, network, secrets) =
+            if descriptor_path == "runtrue-action.yml" {
+                let metadata = parse_runtrue_repository_action_metadata(bytes)
+                    .map_err(frontend_source_error)?;
+                let program = match metadata.program {
+                    RuntrueRepositoryActionProgram::Container {
+                        dockerfile,
+                        entrypoint,
+                        args,
+                    } => SourceActionProgramDeclaration::ContainerBuild {
+                        build_file: dockerfile,
+                        entrypoint,
+                        arguments: args,
+                    },
+                    RuntrueRepositoryActionProgram::Component {
+                        component,
+                        signature_identity,
+                        wit_world,
+                    } => SourceActionProgramDeclaration::Component {
+                        reference: component,
+                        signature_identity,
+                        interface: wit_world,
+                    },
+                };
+                SourceActionDeclaration::new(request.source_reference(), descriptor_path, program)
+                    .map(|declaration| {
+                        (
+                            declaration,
+                            metadata.inputs,
+                            metadata.network,
+                            metadata.secrets,
+                        )
+                    })
+            } else {
+                let metadata =
+                    parse_repository_action_metadata(bytes).map_err(frontend_source_error)?;
+                SourceActionDeclaration::new(
+                    request.source_reference(),
+                    descriptor_path,
+                    SourceActionProgramDeclaration::ContainerBuild {
+                        build_file: metadata.dockerfile,
+                        entrypoint: metadata.entrypoint,
+                        arguments: metadata.args,
+                    },
+                )
+                .map(|declaration| (declaration, metadata.inputs, Vec::new(), Vec::new()))
+            }
+            .map_err(|error| frontend_invalid_source(error.to_string()))?;
 
-        for (name, input) in declaration.1 {
+        for (name, input) in inputs {
             declaration
-                .0
                 .insert_input(name, input)
                 .map_err(|error| frontend_invalid_source(error.to_string()))?;
         }
-        Ok(declaration.0)
+        for destination in network {
+            declaration
+                .insert_network_destination(
+                    ResolvedActionNetworkDestination::new(destination.host, destination.port)
+                        .map_err(|error| frontend_invalid_source(error.to_string()))?,
+                )
+                .map_err(|error| frontend_invalid_source(error.to_string()))?;
+        }
+        for secret in secrets {
+            declaration
+                .insert_secret(
+                    ResolvedActionSecret::new(secret.name, secret.purpose, secret.file_env)
+                        .map_err(|error| frontend_invalid_source(error.to_string()))?,
+                )
+                .map_err(|error| frontend_invalid_source(error.to_string()))?;
+        }
+        Ok(declaration)
     }
 
     fn prepare(

@@ -486,6 +486,27 @@ impl Analyzer {
         let mut env = BTreeMap::new();
         let mut input_text = BTreeMap::new();
         let mut needs_scm_credential = false;
+        if metadata.is_some() {
+            for (name, value) in [
+                (
+                    "RUNTRUE_EVENT_PATH",
+                    "/workspace/.runtrue-runtime/event.json",
+                ),
+                (
+                    "RUNTRUE_SCM_CONTEXT_PATH",
+                    "/workspace/.runtrue-runtime/scm-context.json",
+                ),
+                (
+                    "RUNTRUE_SCM_PROXY_SOCKET",
+                    "/workspace/.runtrue-runtime/scm-proxy.sock",
+                ),
+            ] {
+                env.insert(
+                    name.to_owned(),
+                    runtrue_workflow_ast::Scalar::String(value.to_owned()),
+                );
+            }
+        }
         for (name, value) in &effective_inputs {
             let input_path = format!("{path}.with.{name}");
             if is_github_token_expression(&yaml_text(value)) {
@@ -532,11 +553,46 @@ impl Analyzer {
             }
         }
         effects.container_action_image = Some(source.to_owned());
+        let mut action_secrets = Vec::new();
+        let mut action_network = Vec::new();
+        if let Some(metadata) = metadata {
+            for destination in metadata.network_destinations() {
+                effects
+                    .network_destinations
+                    .insert((destination.host().to_owned(), destination.port()));
+                action_network.push(ast::NetworkDestination {
+                    host: destination.host().to_owned(),
+                    port: destination.port(),
+                    protocol: ast::NetworkProtocol::Tcp,
+                });
+            }
+            for secret in metadata.secrets() {
+                effects
+                    .permissions
+                    .secrets
+                    .insert(secret.name().to_owned(), secret.purpose().to_owned());
+                env.insert(
+                    secret.file_env().to_owned(),
+                    runtrue_workflow_ast::Scalar::String(format!(
+                        "/workspace/.runtrue-runtime/secrets/{}",
+                        secret.name()
+                    )),
+                );
+                action_secrets.push(NativeSecretRequest {
+                    name: secret.name().to_owned(),
+                    purpose: secret.purpose().to_owned(),
+                });
+            }
+        }
         if needs_scm_credential {
             effects.permissions.secrets.insert(
                 "runtrue-scm-provider-token".to_owned(),
                 "provider-api".to_owned(),
             );
+            action_secrets.push(NativeSecretRequest {
+                name: "runtrue-scm-provider-token".to_owned(),
+                purpose: "provider-api".to_owned(),
+            });
         }
         self.lock_images.insert(crate::native::GeneratedImageLock {
             source: source.to_owned(),
@@ -593,15 +649,20 @@ impl Analyzer {
             }),
             env,
             cache: None,
-            capabilities: needs_scm_credential.then_some(NativeStepCapabilities {
-                network: None,
-                cache: None,
-                artifacts: None,
-                secrets: vec![NativeSecretRequest {
-                    name: "runtrue-scm-provider-token".to_owned(),
-                    purpose: "provider-api".to_owned(),
-                }],
-            }),
+            capabilities: (!action_network.is_empty() || !action_secrets.is_empty()).then_some(
+                NativeStepCapabilities {
+                    network: (!action_network.is_empty()).then_some(ast::NetworkPolicy {
+                        dns: ast::DnsPolicy::Restricted,
+                        deny_private_ranges: metadata
+                            .is_none_or(ResolvedSourceAction::deny_private_networks),
+                        allow: action_network,
+                        listen: Vec::new(),
+                    }),
+                    cache: None,
+                    artifacts: None,
+                    secrets: action_secrets,
+                },
+            ),
             mapped: true,
         }
     }
