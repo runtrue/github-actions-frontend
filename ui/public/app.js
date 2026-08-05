@@ -126,6 +126,35 @@
     return `<div class="run-actions"><button class="btn btn-secondary btn-inline btn-compact" type="button" data-retry-run="${escapeHtml(run.id)}" ${unavailable ? "disabled" : ""} ${title ? `title="${escapeHtml(title)}"` : ""} aria-label="Retry ${escapeHtml(run.source?.workflowName || "workflow run")}">${queued ? "Queued" : "Retry"}</button><button class="text-button run-open-button" type="button" data-open-run="${escapeHtml(run.id)}">Details <span aria-hidden="true">→</span></button></div>`;
   }
 
+  function eventsForRepository(repository) {
+    return (state.data.github?.events || []).filter((event) =>
+      String(event.repositoryId || "") === String(repository.id)
+      || (!event.repositoryId && event.repository === repository.key));
+  }
+
+  function runForEvent(event, runs) {
+    return runs.find((run) => run.source?.deliveryId && run.source.deliveryId === event.deliveryId);
+  }
+
+  function eventTypeLabel(event) {
+    const kind = String(event.eventKind || event.providerEventName || "repository_event");
+    const action = String(event.eventAction || "");
+    return action && !kind.endsWith(`.${action}`) ? `${kind}.${action}` : kind;
+  }
+
+  function repositoryEventStatus(event, run) {
+    if (run) return String(run.status || "pending");
+    return event.processingStatus === "failed" ? "failed" : "pending";
+  }
+
+  function latestRepositoryActivity(runs, events) {
+    const timestamps = [
+      ...runs.map((run) => run.startedAt || run.createdAt),
+      ...events.map((event) => event.receivedAt),
+    ].filter(Boolean).sort((left, right) => new Date(right) - new Date(left));
+    return timestamps[0] ? formatDate(timestamps[0]) : "No activity yet";
+  }
+
   function initials(name) {
     const parts = String(name || "User").split(/[^\p{L}\p{N}]+/u).filter(Boolean);
     return (parts.slice(0, 2).map((part) => part[0]).join("") || "U").toUpperCase();
@@ -609,6 +638,7 @@
     state.repositorySettings = null;
     renderRepositorySettings();
     const runs = (state.data.runs || []).filter((run) => run.repositoryId === repository.id);
+    const events = eventsForRepository(repository);
     const approvals = (state.data.approvals || []).filter((approval) => approval.repositoryId === repository.id);
     byId("repository-page-title").textContent = repository.key;
     const providerLink = byId("repository-provider-link");
@@ -625,9 +655,10 @@
     byId("repository-connection-state").className = `state-badge ${tone(repository.state)}`;
     byId("repository-connection-metadata").innerHTML = definitionLinkCard("GitHub repository", repository.key, repository.repositoryUrl) + definitionCard("External ID", repository.externalId);
     const pendingApprovals = approvals.filter((approval) => approval.status === "pending").length;
-    byId("repository-execution-metadata").innerHTML = definitionCard("Runs", runs.length) + definitionCard("Pending approvals", pendingApprovals) + definitionCard("Latest activity", runs[0] ? formatDate(runs[0].createdAt) : "No runs yet");
+    byId("repository-execution-metadata").innerHTML = definitionCard("Events", events.length) + definitionCard("Runs", runs.length) + definitionCard("Pending approvals", pendingApprovals) + definitionCard("Latest activity", latestRepositoryActivity(runs, events));
     byId("repository-uninstall-name").textContent = repository.key;
     renderRepositoryRuns(runs);
+    renderRepositoryEvents(events, runs);
     renderRepositoryApprovals(approvals);
     switchView("repository", false);
     setRepositorySection(section, false);
@@ -639,6 +670,19 @@
     byId("repository-runs-body").innerHTML = runs.map((run) => `<tr><td><strong class="table-primary">${escapeHtml(run.source?.workflowName || "Workflow")}</strong><small><span class="mono" title="${escapeHtml(run.id)}">${escapeHtml(compactId(run.id))}</span> · ${escapeHtml(run.source?.jobCount ?? "—")} ${run.source?.jobCount === 1 ? "job" : "jobs"}</small></td><td class="run-trigger-cell">${runTriggerMarkup(run)}</td><td><span class="state-badge ${tone(run.status)}">${escapeHtml(titleCase(run.status))}</span></td><td class="date-cell">${escapeHtml(formatDate(run.startedAt || run.createdAt))}</td><td>${runActionsMarkup(run)}</td></tr>`).join("");
     byId("repository-runs-empty").hidden = runs.length > 0;
     byId("repository-runs-body").closest("table").hidden = runs.length === 0;
+  }
+
+  function renderRepositoryEvents(events, runs) {
+    byId("repository-event-count").textContent = `${events.length} ${events.length === 1 ? "event" : "events"}`;
+    byId("repository-events-body").innerHTML = events.map((event) => {
+      const run = runForEvent(event, runs);
+      const status = repositoryEventStatus(event, run);
+      const ref = event.refName ? shortRef(event.refName) : "Repository webhook";
+      const handler = titleCase(event.processingStatus || "received");
+      return `<tr><td><strong class="table-primary mono">${escapeHtml(eventTypeLabel(event))}</strong><small>Delivery <span class="mono" title="${escapeHtml(event.deliveryId)}">${escapeHtml(compactId(event.deliveryId, 12))}</span></small></td><td><strong class="table-primary">@${escapeHtml(event.actorLogin || "unknown")}</strong><small>${escapeHtml(ref)} · Handler ${escapeHtml(handler)}</small></td><td><span class="state-badge ${tone(status)}">${escapeHtml(titleCase(status))}</span><small>${run ? `Run ${escapeHtml(compactId(run.id))}` : "No run created yet"}</small></td><td class="date-cell"><time datetime="${escapeHtml(event.receivedAt)}">${escapeHtml(formatDate(event.receivedAt))}</time></td></tr>`;
+    }).join("");
+    byId("repository-events-empty").hidden = events.length > 0;
+    byId("repository-events-body").closest("table").hidden = events.length === 0;
   }
 
   function renderRepositoryApprovals(approvals) {
@@ -1692,25 +1736,30 @@
     try {
       const response = await fetch("/api/v1/ui/github", { credentials: "same-origin", headers: { accept: "application/json" }, cache: "no-store" });
       if (response.status === 401) return showLogin();
-      if (!response.ok) throw new Error("Could not refresh repository runs.");
+      if (!response.ok) throw new Error("Could not refresh repository activity.");
       const dashboard = await response.json();
       state.data.runs = dashboard.runs || [];
+      state.data.github = dashboard.github || state.data.github;
       configureRunFilters();
       renderRuns();
       renderOverview();
       if (state.activeRepository) {
         const runs = state.data.runs.filter((run) => run.repositoryId === state.activeRepository.id);
+        const events = eventsForRepository(state.activeRepository);
         renderRepositoryRuns(runs);
-        byId("repository-execution-metadata").innerHTML = definitionCard("Runs", runs.length) + definitionCard("Latest activity", runs[0] ? formatDate(runs[0].createdAt) : "No runs yet");
+        renderRepositoryEvents(events, runs);
+        const approvals = (state.data.approvals || []).filter((approval) => approval.repositoryId === state.activeRepository.id);
+        const pendingApprovals = approvals.filter((approval) => approval.status === "pending").length;
+        byId("repository-execution-metadata").innerHTML = definitionCard("Events", events.length) + definitionCard("Runs", runs.length) + definitionCard("Pending approvals", pendingApprovals) + definitionCard("Latest activity", latestRepositoryActivity(runs, events));
       }
-      showToast("Repository runs refreshed.");
+      showToast("Repository activity refreshed.");
     } catch (error) {
-      showToast(error.message || "Could not refresh repository runs.");
+      showToast(error.message || "Could not refresh repository activity.");
     } finally {
       state.repositoryRunsRefreshing = false;
       button.disabled = false;
       button.removeAttribute("aria-busy");
-      button.textContent = "Refresh runs";
+      button.textContent = "Refresh activity";
     }
   }
 

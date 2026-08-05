@@ -28,8 +28,8 @@ use axum::Json;
 use runtrue_auth::AuthContext;
 use runtrue_control_plane::{
     ConfigurationProjectTargetKind, ControlPlaneError, DurableEventRecord, DurableEventSource,
-    GitHubAccountKind, GitHubRepositorySelection, LinkSelectedGitHubRepository, RepositoryRecord,
-    SecretMetadataReference,
+    DurableTaskStatus, GitHubAccountKind, GitHubRepositorySelection, LinkSelectedGitHubRepository,
+    RepositoryRecord, SecretMetadataReference,
 };
 use runtrue_model::ContentDigest;
 use runtrue_policy::{
@@ -2195,11 +2195,38 @@ async fn github_browser_state_response(
                 Err(error) => return control_plane_problem(&request_id, error),
             };
             for event in records {
+                let digest = ContentDigest::sha256(event.delivery_id.as_bytes());
+                let suffix = digest.as_str().trim_start_matches("sha256:");
+                let durable_event_id = format!("event-scm-github-{suffix}");
+                let (event_action, processing_status) =
+                    match state.store.event(&durable_event_id).await {
+                        Ok(durable) => {
+                            let action = durable
+                                .payload
+                                .pointer("/event_type/action")
+                                .and_then(Value::as_str)
+                                .map(str::to_owned);
+                            let status = match state.store.task(&durable.task_id).await {
+                                Ok(task) => match task.status {
+                                    DurableTaskStatus::Pending => "pending",
+                                    DurableTaskStatus::Claimed => "processing",
+                                    DurableTaskStatus::Completed => "completed",
+                                    DurableTaskStatus::Failed => "failed",
+                                },
+                                Err(_) => "received",
+                            };
+                            (action, status.to_owned())
+                        }
+                        Err(_) => (None, "received".to_owned()),
+                    };
                 events.push(GitHubRepositoryEventView {
                     delivery_id: event.delivery_id,
+                    repository_id: linked_repository_id.to_owned(),
                     repository: repository.full_name.clone(),
                     provider_event_name: event.provider_event_name,
                     event_kind: event.event_kind,
+                    event_action,
+                    processing_status,
                     actor_login: event.actor_login,
                     ref_name: event.ref_name,
                     received_at: match timestamp(event.received_unix_ms) {
@@ -3199,6 +3226,10 @@ fn browser_run_source(capsule: &ExecutionCapsule, repository_url: Option<&str>) 
         .as_ref()
         .and_then(|value| value.pointer("/event_type/action"))
         .and_then(Value::as_str);
+    let delivery_id = event
+        .as_ref()
+        .and_then(|value| value.get("event_id"))
+        .and_then(Value::as_str);
     let actor = event
         .as_ref()
         .and_then(|value| value.pointer("/actor/login"))
@@ -3269,6 +3300,7 @@ fn browser_run_source(capsule: &ExecutionCapsule, repository_url: Option<&str>) 
         "workflowPath": capsule.workflow.source_path,
         "eventKind": event_kind,
         "eventAction": event_action,
+        "deliveryId": delivery_id,
         "actor": actor,
         "refName": ref_name,
         "commitSha": capsule.context.source_commit,
@@ -3843,6 +3875,7 @@ mod user_catalog_tests {
                 normalized_event_digest: ContentDigest::sha256(b"event"),
                 normalized_event_json: Some(
                     json!({
+                        "event_id": "delivery-pr-42",
                         "event_type": {"kind": "pull_request", "action": "synchronize"},
                         "actor": {"login": "ada"},
                         "ref_name": "refs/heads/feature",
@@ -3871,6 +3904,7 @@ mod user_catalog_tests {
         let source = browser_run_source(&capsule, Some("https://github.example/octo/repo"));
         assert_eq!(source["workflowName"], "CI");
         assert_eq!(source["eventKind"], "pull_request");
+        assert_eq!(source["deliveryId"], "delivery-pr-42");
         assert_eq!(source["actor"], "ada");
         assert_eq!(source["pullRequestNumber"], 42);
         assert_eq!(source["url"], "https://github.example/octo/repo/pull/42");

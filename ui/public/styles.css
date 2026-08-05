@@ -870,6 +870,17 @@ svg { display: block; }
 .repository-section-heading h2 { margin: 0 0 var(--space-1); font-size: var(--text-xl); }
 .repository-section-heading p { margin: 0; color: var(--muted); font-size: var(--text-sm); }
 .repository-section-heading p strong { color: var(--fg); font-weight: 500; }
+.repository-activity-block { padding-top: var(--space-5); border-top: 1px solid var(--border); }
+.repository-activity-block + .repository-activity-block { margin-top: var(--space-7); }
+.repository-subsection-heading { margin-bottom: var(--space-3); display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-4); }
+.repository-subsection-heading h3 { margin: 0 0 var(--space-1); font-size: var(--text-lg); }
+.repository-subsection-heading p { max-width: 72ch; margin: 0; color: var(--muted); font-size: var(--text-xs); }
+.repository-event-table { min-width: 720px; }
+.repository-event-table td:first-child { min-width: 210px; }
+.repository-event-table td:nth-child(2) { min-width: 220px; }
+.repository-event-table td:nth-child(3) { min-width: 150px; }
+.repository-event-table td:nth-child(3) small { display: block; }
+.repository-event-table .date-cell { white-space: nowrap; }
 .repository-settings-card { margin-bottom: var(--space-6); padding: var(--space-6); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); }
 .repository-settings-card h3 { margin: 0 0 var(--space-2); font-size: var(--text-lg); }
 .repository-settings-card p { margin: 0; color: var(--muted); font-size: var(--text-sm); }
@@ -1129,6 +1140,7 @@ svg { display: block; }
   .section-actions .btn { width: 100%; }
   .repository-page-heading,
   .repository-section-heading,
+  .repository-subsection-heading,
   .workflow-detail-heading,
   .workflow-plan-bar { align-items: stretch; flex-direction: column; }
   .repository-heading-actions { justify-content: space-between; }
