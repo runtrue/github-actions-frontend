@@ -26,11 +26,12 @@ use crate::app::{
     list_repositories, list_repository_access, list_runner_pools, list_runners, list_runs,
     list_secret_metadata, list_team_members, list_teams, list_users, logout_browser_session,
     oidc_discovery, oidc_jwks, plan_runner_replacement, promote_artifact, promote_cache,
-    put_repository_access, put_runner_slot, put_runner_update_policy, put_runner_update_release,
-    put_variable, readiness, refresh_browser_session, remove_team_member, replay_event,
-    request_context, require_bearer, require_writable_control_plane, require_writable_human_auth,
-    revoke_api_token, revoke_github_installation, revoke_repository_access, rotate_secret,
-    route_not_found, save_browser_configuration_project, save_browser_organization_secret,
+    put_repository_access, put_runner_fleet_configuration, put_runner_slot,
+    put_runner_update_policy, put_runner_update_release, put_variable, readiness,
+    refresh_browser_session, remove_team_member, replay_event, request_context, require_bearer,
+    require_writable_control_plane, require_writable_human_auth, revoke_api_token,
+    revoke_github_installation, revoke_repository_access, rotate_secret, route_not_found,
+    save_browser_configuration_project, save_browser_organization_secret,
     save_browser_organization_variable, save_browser_repository_secret,
     save_browser_repository_variable, save_browser_repository_workflow_directory,
     save_browser_scoped_secret, start_github_installation_from_ui, sync_github_installation,
@@ -120,6 +121,10 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/v1/runner-pools/:pool_id", get(get_runner_pool))
         .route("/api/v1/runner-pools/:pool_id/fleet", get(get_runner_fleet))
+        .route(
+            "/api/v1/runner-pools/:pool_id/fleet/configuration",
+            axum::routing::put(put_runner_fleet_configuration),
+        )
         .route(
             "/api/v1/runner-pools/:pool_id/fleet/lease",
             post(acquire_runner_fleet_lease),

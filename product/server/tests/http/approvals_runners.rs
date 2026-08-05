@@ -230,32 +230,33 @@ async fn autoscaler_http_contract_is_authenticated_exact_and_fenced() {
         .unwrap();
     let compatibility = ContentDigest::sha256(b"http-compatibility");
     let template_digest = ContentDigest::sha256(b"http-template");
-    control_plane
-        .upsert_runner_pool_template(&runtrue_control_plane::RunnerPoolTemplateRecord {
-            pool_id: "pool-fleet-http".to_owned(),
-            runtime_compatibility_digest: compatibility.clone(),
-            provider: "fake".to_owned(),
-            provider_template_id: "fake-template".to_owned(),
-            runner_template_digest: template_digest.clone(),
-            created_unix_ms: 1,
-            updated_unix_ms: 1,
-        })
+    let configured = application
+        .clone()
+        .oneshot(api_request(
+            "PUT",
+            "/api/v1/runner-pools/pool-fleet-http/fleet/configuration",
+            serde_json::to_vec(&json!({
+                "baseline_runtime_compatibility_digest": compatibility,
+                "minimum_workers": 1,
+                "minimum_idle_workers": 0,
+                "maximum_workers": 3,
+                "scale_up_batch": 1,
+                "idle_timeout_ms": 60_000,
+                "offline_grace_ms": 60_000,
+                "cooldown_ms": 1_000,
+                "enabled": true,
+                "templates": [{
+                    "runtime_compatibility_digest": compatibility,
+                    "provider": "fake",
+                    "provider_template_id": "fake-template",
+                    "runner_template_digest": template_digest,
+                }]
+            }))
+            .unwrap(),
+        ))
+        .await
         .unwrap();
-    control_plane
-        .upsert_runner_pool_scaling_policy(&runtrue_control_plane::RunnerPoolScalingPolicy {
-            pool_id: "pool-fleet-http".to_owned(),
-            baseline_runtime_compatibility_digest: Some(compatibility.clone()),
-            minimum_workers: 1,
-            minimum_idle_workers: 0,
-            maximum_workers: 3,
-            scale_up_batch: 1,
-            idle_timeout_ms: 60_000,
-            offline_grace_ms: 60_000,
-            cooldown_ms: 1_000,
-            enabled: true,
-            updated_unix_ms: 1,
-        })
-        .unwrap();
+    assert_eq!(configured.status(), StatusCode::NO_CONTENT);
 
     let unauthenticated = application
         .clone()

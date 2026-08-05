@@ -39,7 +39,9 @@ cargo build --locked --release -p runtrue-server --bin runtrue-quickstart
 
 The normal core server and standalone UI container remain separate deployment
 options. Job execution runners are deliberately not moved into the trusted
-quick-start process; run a local runner beside it when execution is required.
+quick-start process. Quick-start deployments should use Runtrue's existing
+autoscaler and provider runtime to launch ephemeral runners from queued demand;
+they must not embed a separate fixed-runner lifecycle in this product binary.
 
 Before changing this repository to public visibility, make the five pinned
 Runtrue core crates in `Cargo.toml` available to anonymous clean checkouts.

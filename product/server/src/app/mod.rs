@@ -161,10 +161,10 @@ use routes::{
     list_repositories, list_repository_access, list_runner_pools, list_runners, list_runs,
     list_secret_metadata, list_team_members, list_teams, list_users, plan_runner_replacement,
     promote_artifact, promote_cache, protect_sensitive_response, put_repository_access,
-    put_runner_slot, put_runner_update_policy, put_runner_update_release, put_variable, readiness,
-    remove_team_member, replay_event, revoke_api_token, revoke_repository_access, rotate_secret,
-    route_not_found, scope_tenant, scoped_resource, transition_runner_fleet_request, update_team,
-    update_user, Items,
+    put_runner_fleet_configuration, put_runner_slot, put_runner_update_policy,
+    put_runner_update_release, put_variable, readiness, remove_team_member, replay_event,
+    revoke_api_token, revoke_repository_access, rotate_secret, route_not_found, scope_tenant,
+    scoped_resource, transition_runner_fleet_request, update_team, update_user, Items,
 };
 use state::{authentication_tag, GitHubInstallationState, HumanOidcState};
 pub use state::{
