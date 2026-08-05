@@ -1,4 +1,74 @@
 use super::support::*;
+
+#[tokio::test]
+async fn github_browser_imports_an_existing_app_installation_without_starting_setup() {
+    let (control, provider, application) = github_oauth_application().await;
+    let begin = application
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/auth/login")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(begin.status(), StatusCode::FOUND);
+    let login_cookie = response_cookie(&begin, "runtrue_login").unwrap();
+    let state = location_parameter(begin.headers()[LOCATION].to_str().unwrap(), "state");
+    let login = application
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/auth/callback?code=github-code&state={state}"))
+                .header("cookie", format!("runtrue_login={login_cookie}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(login.status(), StatusCode::SEE_OTHER);
+    let cookies = browser_cookie_header(&login);
+    let session = application
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/session")
+                .header("cookie", &cookies)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let csrf = json_body(session).await["csrf_token"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let imported = application
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/github/installations/start")
+                .header("cookie", &cookies)
+                .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from(format!(
+                    "csrf_token={csrf}&idempotency_key=import-existing&repository_ids=77&import_only=true"
+                )))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(imported.status(), StatusCode::SEE_OTHER);
+    assert_eq!(imported.headers()[LOCATION], "/?github=linked");
+    assert_eq!(provider.calls.load(Ordering::Relaxed), 1);
+    let (_, installation, _) = control
+        .github_repository_for_event("9001", "77", "octo", "runtrue")
+        .unwrap();
+    assert_eq!(installation.external_id, "9001");
+}
+
 #[tokio::test]
 async fn github_app_setup_binds_exact_tenant_repository_and_one_use_callback() {
     let control = Arc::new(ControlPlane::open_in_memory("github-api-http", 1).unwrap());

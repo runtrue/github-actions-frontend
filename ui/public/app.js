@@ -1647,6 +1647,17 @@
     submitLocalForm("/github/installations/start", fields);
   }
 
+  function submitImportAction(repositories) {
+    const action = state.data.installAction;
+    if (!action) return showToast("GitHub App configuration is not ready.");
+    submitLocalForm("/github/installations/start", {
+      csrf_token: action.csrfToken,
+      idempotency_key: action.idempotencyKey,
+      repository_ids: repositories.map((repository) => repository.externalRepositoryId).join(","),
+      import_only: "true",
+    });
+  }
+
   function refreshGitHubAccess() {
     location.assign(`/auth/login?return_to=${encodeURIComponent(`${location.pathname}${location.search}`)}`);
   }
@@ -1708,8 +1719,10 @@
 
   function confirmSelectedRepositories() {
     const selected = [...state.selectedRepositories.values()];
-    if (selected.some((repository) => ["needs_installation", "existing_installation"].includes(repository.state))) {
+    if (selected.some((repository) => repository.state === "needs_installation")) {
       submitInstallAction(selected);
+    } else if (selected.some((repository) => repository.state === "existing_installation")) {
+      submitImportAction(selected);
     } else {
       addSelectedRepositories();
     }

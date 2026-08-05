@@ -35,7 +35,9 @@ pub(super) use runtrue_scm::{
     GitHubRepositoryVisibility, GitRevision, ProviderKind, RepositoryIdentity,
 };
 pub(super) use runtrue_server::{
-    router, AppState, HumanOidcAdapter, HumanOidcError, HumanOidcLimits, VerifiedHumanIdentity,
+    router, AppState, GitHubAccessToken, GitHubOauthAdapter, GitHubOauthQuickstartConfig,
+    GitHubUserCatalog, GitHubUserInstallation, GitHubUserRepository, HumanOidcAdapter,
+    HumanOidcError, HumanOidcLimits, VerifiedGitHubIdentity, VerifiedHumanIdentity,
 };
 pub(super) use runtrue_workflow_ir::{
     ApprovalRequirements, Architecture, CapsuleContext, ExecutionCapsule, Isolation,
@@ -113,6 +115,51 @@ impl HumanOidcAdapter for FakeHumanOidcAdapter {
             .unwrap()
             .take()
             .unwrap_or(Err(HumanOidcError::InvalidTokenResponse))
+    }
+}
+
+#[derive(Debug)]
+pub(super) struct FakeGitHubOauthAdapter;
+
+impl GitHubOauthAdapter for FakeGitHubOauthAdapter {
+    fn exchange_authorization_code(
+        &self,
+        _authorization_code: &str,
+        _redirect_uri: &str,
+    ) -> Result<VerifiedGitHubIdentity, HumanOidcError> {
+        Ok(VerifiedGitHubIdentity {
+            user_id: 42,
+            login: "ada".to_owned(),
+            display_name: "Ada".to_owned(),
+            email: Some("ada@example.test".to_owned()),
+            claims_digest: ContentDigest::sha256(b"github-claims:42"),
+            access_token: GitHubAccessToken::new("github-user-token".to_owned()),
+        })
+    }
+
+    fn authorized_catalog(&self, _access_token: &str) -> Result<GitHubUserCatalog, HumanOidcError> {
+        Ok(GitHubUserCatalog {
+            organizations: vec!["octo".to_owned()],
+            repositories: vec![GitHubUserRepository {
+                repository_id: 77,
+                owner_id: 501,
+                owner: "octo".to_owned(),
+                name: "runtrue".to_owned(),
+                visibility: "private".to_owned(),
+                default_branch: "main".to_owned(),
+            }],
+        })
+    }
+
+    fn authorized_installations(
+        &self,
+        _access_token: &str,
+    ) -> Result<Vec<GitHubUserInstallation>, HumanOidcError> {
+        Ok(vec![GitHubUserInstallation {
+            installation_id: 9_001,
+            account_id: 501,
+            account_login: "octo".to_owned(),
+        }])
     }
 }
 
@@ -385,6 +432,37 @@ pub(super) fn github_human_application() -> (
         .unwrap();
     let application = router(state.clone());
     (control, oidc, provider, state, application)
+}
+
+pub(super) async fn github_oauth_application() -> (
+    Arc<ControlPlane>,
+    Arc<FakeGitHubInstallationProvider>,
+    Router,
+) {
+    let control = Arc::new(ControlPlane::open_in_memory("github-oauth-http", 1).unwrap());
+    let provider = Arc::new(FakeGitHubInstallationProvider::new());
+    let human_oidc = Arc::new(FakeHumanOidcAdapter::default());
+    let github_oauth = Arc::new(FakeGitHubOauthAdapter);
+    let state = github_state(Arc::clone(&control), Arc::clone(&provider))
+        .with_human_oidc(
+            "https://runtrue.example".to_owned(),
+            &[23; 32],
+            human_oidc,
+            HumanOidcLimits::default(),
+        )
+        .unwrap()
+        .with_github_oauth_quickstart(GitHubOauthQuickstartConfig {
+            tenant_id: "tenant-browser".to_owned(),
+            tenant_name: "Tenant Browser".to_owned(),
+            web_origin: "https://github.com".to_owned(),
+            client_id: "Iv1.test".to_owned(),
+            adapter: github_oauth,
+            allowed_roles: BTreeMap::from([(42, "policy-administrator".to_owned())]),
+            now_unix_ms: unix_ms_now(),
+        })
+        .await
+        .unwrap();
+    (control, provider, router(state))
 }
 
 pub(super) fn response_cookie(response: &Response, name: &str) -> Option<String> {
