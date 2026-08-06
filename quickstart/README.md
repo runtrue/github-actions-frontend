@@ -95,6 +95,14 @@ containerd image store. Admission imports the image into the same rootless Podma
 store mounted by autoscaled runners and writes a signed manifest into the
 shared runtime assets.
 
+The trusted `action-builder` client joins only the `scm-egress` network because
+Buildx performs registry token exchange through its client-side session. The
+admission service remains offline. Docker Hub applies anonymous pull limits to
+shared source addresses; production and shared-host installations should set
+`RUNTRUE_DOCKERHUB_USERNAME` and `RUNTRUE_DOCKERHUB_TOKEN_SOURCE`. The installer
+generates a private, persistent Docker client configuration from that read-only
+access token without writing the token to the generated environment file.
+
 The installer creates a deployment-local Ed25519 image-admission key and adds
 only its public key to the runner trust directory. The private signing key is
 mounted read-only into the isolated builder and never enters a runner.

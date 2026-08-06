@@ -10,6 +10,18 @@ bash -n "${QUICKSTART_DIR}/quick-start.sh"
 bash -n "${QUICKSTART_DIR}/bootstrap-state.sh"
 bash -n "${QUICKSTART_DIR}/traefik-entrypoint.sh"
 
+installer=$(<"${QUICKSTART_DIR}/quick-start.sh")
+for required in \
+  RUNTRUE_DOCKERHUB_USERNAME \
+  RUNTRUE_DOCKERHUB_TOKEN_SOURCE \
+  'https://index.docker.io/v1/' \
+  'repository-actions/builder/docker-config/config.json'; do
+  [[ "$installer" == *"$required"* ]] || {
+    printf 'quickstart installer is missing Docker Hub credential support: %s\n' "$required" >&2
+    exit 1
+  }
+done
+
 cat >"${temporary}/runtime.env" <<EOF
 RUNTRUE_RUNTIME_UID=10001
 RUNTRUE_RUNTIME_GID=10001
@@ -87,8 +99,8 @@ if "action-builder" not in server.get("depends_on", {}):
 builder = services["action-builder"]
 if "action-admission" not in builder.get("depends_on", {}):
     raise SystemExit("action builder does not require admission to be healthy")
-if builder.get("network_mode") != "none":
-    raise SystemExit("action builder must not join a Compose network")
+if builder.get("networks") != {"scm-egress": None}:
+    raise SystemExit("action builder must join only the registry egress network")
 builder_command = " ".join(builder.get("command", []))
 syntax = subprocess.run(
     ["/bin/sh", "-n"], input=builder_command, text=True, capture_output=True, check=False
