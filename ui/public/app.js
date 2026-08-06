@@ -136,8 +136,8 @@
       || (!event.repositoryId && event.repository === repository.key));
   }
 
-  function runForEvent(event, runs) {
-    return runs.find((run) => run.source?.deliveryId && run.source.deliveryId === event.deliveryId);
+  function runsForEvent(event, runs) {
+    return runs.filter((run) => run.source?.deliveryId && run.source.deliveryId === event.deliveryId);
   }
 
   function eventTypeLabel(event) {
@@ -146,13 +146,21 @@
     return action && !kind.endsWith(`.${action}`) ? `${kind}.${action}` : kind;
   }
 
-  function repositoryEventPresentation(event, run) {
-    if (run) {
-      const status = String(run.status || "pending");
+  function repositoryEventPresentation(event, runs) {
+    if (runs.length) {
+      const statuses = runs.map((run) => String(run.status || "pending"));
+      const status = statuses.some((value) => tone(value) === "danger")
+        ? "failed"
+        : statuses.some((value) => tone(value) === "running")
+          ? "running"
+          : statuses.every((value) => tone(value) === "success") ? "succeeded" : "pending";
+      const succeeded = statuses.filter((value) => tone(value) === "success").length;
+      const failed = statuses.filter((value) => tone(value) === "danger").length;
+      const summary = [succeeded ? `${succeeded} succeeded` : "", failed ? `${failed} failed` : ""].filter(Boolean).join(" · ");
       return {
         status,
-        label: titleCase(status),
-        detail: `Run ${compactId(run.id)}`,
+        label: `${runs.length} ${runs.length === 1 ? "run" : "runs"} created`,
+        detail: summary || "Execution pending",
       };
     }
     switch (String(event.processingStatus || "received").toLowerCase()) {
@@ -284,6 +292,12 @@
         state: state.data.github?.overall || "missing",
       },
       {
+        label: "Repository actions",
+        value: state.data.github?.health?.actionBuilder === "Ready" ? "Ready" : "Unavailable",
+        detail: state.data.github?.health?.actionBuilder === "Ready" ? "Source builds and signed admission enabled" : "Builder and admission services required",
+        state: state.data.github?.health?.actionBuilder === "Ready" ? "ready" : "warning",
+      },
+      {
         label: "Repository scope",
         value: `${readyRepositories.length} of ${repositories.length} ready`,
         detail: repositories.length ? "Connected execution repositories" : "No repositories connected",
@@ -356,11 +370,26 @@
   }
 
   function renderAlert() {
-    const alert = state.data.github.alert;
+    const actionBuilderMissing = state.data.github?.health?.actionBuilder !== "Ready";
+    const alert = state.data.github.alert || (actionBuilderMissing ? {
+      title: "Repository action builds are unavailable",
+      detail: "Webhook processing still works, but workflows that use source-built actions such as AI review cannot create jobs. Install the action builder and admission services, then retry the event.",
+    } : null);
     const target = byId("page-alert");
-    if (!alert) return void (target.hidden = true);
-    target.innerHTML = `<div><strong>${escapeHtml(alert.title)}</strong><p>${escapeHtml(alert.detail)}</p></div>`;
+    target.classList.toggle("capability-notice", actionBuilderMissing);
+    const capabilityTargets = document.querySelectorAll("[data-action-builder-warning]");
+    if (!alert) {
+      target.hidden = true;
+      capabilityTargets.forEach((element) => { element.hidden = true; });
+      return;
+    }
+    const markup = `<div><strong>${escapeHtml(alert.title)}</strong><p>${escapeHtml(alert.detail)}</p></div>`;
+    target.innerHTML = markup;
     target.hidden = false;
+    capabilityTargets.forEach((element) => {
+      element.innerHTML = markup;
+      element.hidden = !actionBuilderMissing;
+    });
   }
 
   function renderRuns() {
@@ -422,7 +451,7 @@
     const overall = byId("github-overall");
     overall.className = `state-badge ${tone(github.overall)}`;
     overall.textContent = github.overall;
-    const labels = { app: "GitHub App", signer: "Non-exportable signer", webhook: "Webhook verification", callback: "Setup callback" };
+    const labels = { app: "GitHub App", signer: "Non-exportable signer", webhook: "Webhook verification", callback: "Setup callback", actionBuilder: "Repository action builder" };
     byId("github-health").innerHTML = Object.entries(github.health).map(([key, value]) => `<article class="health-card"><span>${escapeHtml(labels[key] || key)}</span><strong class="state-badge ${tone(value)}">${escapeHtml(value)}</strong></article>`).join("");
     const metadata = [["Provider", github.metadata.providerHost], ["App slug", github.metadata.appSlug || "Not configured"], ["App ID", github.metadata.appId ?? "Not configured"]];
     byId("github-metadata").innerHTML = metadata.map(([label, value]) => definitionCard(label, value)).join("");
@@ -701,8 +730,8 @@
   function renderRepositoryEvents(events, runs) {
     byId("repository-event-count").textContent = `${events.length} ${events.length === 1 ? "event" : "events"}`;
     byId("repository-events-body").innerHTML = events.map((event) => {
-      const run = runForEvent(event, runs);
-      const outcome = repositoryEventPresentation(event, run);
+      const eventRuns = runsForEvent(event, runs);
+      const outcome = repositoryEventPresentation(event, eventRuns);
       const ref = event.refName ? shortRef(event.refName) : "Repository webhook";
       const handler = titleCase(event.processingStatus || "received");
       return `<tr><td><strong class="table-primary mono">${escapeHtml(eventTypeLabel(event))}</strong><small>Delivery <span class="mono" title="${escapeHtml(event.deliveryId)}">${escapeHtml(compactId(event.deliveryId, 12))}</span></small></td><td><div class="repository-event-source"><strong class="table-primary">@${escapeHtml(event.actorLogin || "unknown")}</strong><small>${escapeHtml(ref)} · Handler ${escapeHtml(handler)}</small></div></td><td><span class="state-badge ${tone(outcome.status)}">${escapeHtml(outcome.label)}</span><small>${escapeHtml(outcome.detail)}</small></td><td class="date-cell"><time datetime="${escapeHtml(event.receivedAt)}">${escapeHtml(formatDate(event.receivedAt))}</time></td></tr>`;
@@ -747,7 +776,8 @@
     const workflows = inventory.workflows || [];
     metadata.hidden = false;
     const commit = String(inventory.commit || "");
-    metadata.innerHTML = definitionCard("Watched branch", inventory.branch) + `<div><span>Exact commit</span><strong class="mono" title="${escapeHtml(commit)}">${escapeHtml(commit.slice(0, 12))}</strong></div>` + definitionCard("Workflow location", inventory.workflowDirectory) + definitionCard("Workflows", workflows.length);
+    const builderWarning = state.data.github?.health?.actionBuilder === "Ready" ? "" : `<div class="workflow-capability-warning"><strong>Repository action builds unavailable</strong><span>Workflows using source-built actions cannot create jobs until the action builder and admission services are installed.</span></div>`;
+    metadata.innerHTML = builderWarning + definitionCard("Watched branch", inventory.branch) + `<div><span>Exact commit</span><strong class="mono" title="${escapeHtml(commit)}">${escapeHtml(commit.slice(0, 12))}</strong></div>` + definitionCard("Workflow location", inventory.workflowDirectory) + definitionCard("Workflows", workflows.length);
     byId("repository-workflows-body").innerHTML = workflows.map((workflow) => {
       const triggers = workflow.triggers?.length
         ? `<div class="workflow-trigger-list">${workflow.triggers.map((trigger) => `<span>${escapeHtml(trigger)}</span>`).join("")}</div>`

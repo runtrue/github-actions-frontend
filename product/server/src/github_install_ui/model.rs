@@ -60,6 +60,8 @@ pub struct GitHubAppHealth {
     pub webhook: ComponentHealth,
     /// Whether the setup callback is configured and healthy.
     pub callback: ComponentHealth,
+    /// Whether source-built immutable repository actions can be prepared.
+    pub action_builder: ComponentHealth,
 }
 
 impl GitHubAppHealth {

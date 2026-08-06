@@ -1,0 +1,143 @@
+{
+  "image": "__RUNTRUE_RUNNER_IMAGE__",
+  "command": ["enroll-if-needed"],
+  "environment": [
+    "RUNTRUE_RUNNER_ENDPOINT=https://server:8443",
+    "RUNTRUE_RUNNER_ENROLLMENT_ENDPOINT=https://server:8444",
+    "RUNTRUE_RUNNER_LAUNCH_CLAIM_FILE=/run/runtrue-launch/claim.json",
+    "RUNTRUE_RUNNER_CA_CERTIFICATE=/run/runtrue-runner-ca.pem",
+    "RUNTRUE_RUNNER_CREDENTIAL_DIRECTORY=/var/lib/runtrue-igh-oci/runner/credentials",
+    "RUNTRUE_RUNNER_STATE_DIRECTORY=/var/lib/runtrue-igh-oci/runner/state",
+    "RUNTRUE_RUNNER_WORKSPACE_DIRECTORY=/var/lib/runtrue-igh-oci/workspaces",
+    "RUNTRUE_RUNNER_CAPSULE_KEYRING=/run/runtrue-runner-trust/capsule-keys",
+    "RUNTRUE_RUNNER_REGION=single-node",
+    "RUNTRUE_RUNNER_TRUSTED_NATIVE=false",
+    "RUNTRUE_RUNNER_EPHEMERAL=true",
+    "RUNTRUE_RUNNER_WASM_COMPONENT_DIRECTORY=/run/runtrue-wasm/components",
+    "RUNTRUE_RUNNER_WASM_MANIFEST_DIRECTORY=/run/runtrue-wasm/manifests",
+    "RUNTRUE_RUNNER_WASM_COMPONENT_KEYRING=/run/runtrue-wasm/keys",
+    "RUNTRUE_RUNNER_WASM_AOT_CACHE=/var/lib/runtrue-igh-oci/wasm-aot",
+    "RUNTRUE_RUNNER_WASM_RUNTIME_KEY=/run/runtrue-wasm/runtime.key",
+    "RUNTRUE_RUNNER_WASM_MAX_CONCURRENT_JOBS=1",
+    "HOME=/var/lib/runtrue-igh-oci/home",
+    "XDG_RUNTIME_DIR=/var/lib/runtrue-igh-oci/runtime",
+    "TMPDIR=/var/lib/runtrue-igh-oci/tmp",
+    "RUNTRUE_RUNNER_OCI_STATE_DIRECTORY=/var/lib/runtrue-igh-oci/oci-state",
+    "RUNTRUE_RUNNER_OCI_PODMAN=/usr/bin/podman",
+    "RUNTRUE_RUNNER_OCI_SECCOMP_PROFILE=/var/lib/runtrue-igh-oci/seccomp.json",
+    "RUNTRUE_RUNNER_OCI_IMAGE_STORE=/var/lib/runtrue-igh-oci/image-store",
+    "RUNTRUE_RUNNER_OCI_RUNTIME_ENVIRONMENT=/var/lib/runtrue-igh-oci/runtime-environment.json",
+    "RUNTRUE_RUNNER_OCI_MANIFEST_DIRECTORY=/var/lib/runtrue-igh-oci/manifests",
+    "RUNTRUE_RUNNER_OCI_IMAGE_KEYRING=/var/lib/runtrue-igh-oci/image-keys"
+  ],
+  "labels": {
+    "dev.runtrue.autoscaled": "true",
+    "dev.runtrue.installation": "__RUNTRUE_COMPOSE_PROJECT_NAME__",
+    "dev.runtrue.profile": "wasm-oci"
+  },
+  "network": "__RUNTRUE_CONTROL_NETWORK__",
+  "additional_networks": ["__RUNTRUE_SCM_NETWORK__"],
+  "user": "__RUNTRUE_RUNTIME_UID__:__RUNTRUE_RUNTIME_GID__",
+  "runtime_uid": __RUNTRUE_RUNTIME_UID__,
+  "runtime_gid": __RUNTRUE_RUNTIME_GID__,
+  "state_mount_target": "/var/lib/runtrue-igh-oci",
+  "working_directory": "/var/lib/runtrue-igh-oci",
+  "privileged": true,
+  "devices": [
+    {
+      "PathOnHost": "/dev/fuse",
+      "PathInContainer": "/dev/fuse",
+      "CgroupPermissions": "rwm"
+    }
+  ],
+  "read_only_rootfs": false,
+  "cap_drop": [],
+  "security_opt": ["label=disable"],
+  "state_directories": [
+    "runner/credentials",
+    "runner/state",
+    "workspaces",
+    "wasm-aot",
+    "home",
+    "runtime",
+    "tmp",
+    "oci-state"
+  ],
+  "memory_bytes": 6442450944,
+  "nano_cpus": 2000000000,
+  "pids_limit": 768,
+  "capacity_reserve_memory_bytes": 4294967296,
+  "capacity_reserve_nano_cpus": 2000000000,
+  "tmpfs": {
+    "/tmp": "rw,noexec,nosuid,nodev,size=134217728,mode=1777",
+    "/run": "rw,noexec,nosuid,nodev,size=16777216,mode=0755"
+  },
+  "mounts": [
+    {
+      "Type": "bind",
+      "Source": "__RUNTRUE_STATE_DIR__/tls/runner-ca.pem",
+      "Target": "/run/runtrue-runner-ca.pem",
+      "ReadOnly": true
+    },
+    {
+      "Type": "bind",
+      "Source": "__RUNTRUE_STATE_DIR__/runner-trust",
+      "Target": "/run/runtrue-runner-trust",
+      "ReadOnly": true
+    },
+    {
+      "Type": "bind",
+      "Source": "__RUNTRUE_STATE_DIR__/autoscaler/runtime-assets/wasm/components",
+      "Target": "/run/runtrue-wasm/components",
+      "ReadOnly": true
+    },
+    {
+      "Type": "bind",
+      "Source": "__RUNTRUE_STATE_DIR__/autoscaler/runtime-assets/wasm/manifests",
+      "Target": "/run/runtrue-wasm/manifests",
+      "ReadOnly": true
+    },
+    {
+      "Type": "bind",
+      "Source": "__RUNTRUE_STATE_DIR__/autoscaler/runtime-assets/wasm/keys",
+      "Target": "/run/runtrue-wasm/keys",
+      "ReadOnly": true
+    },
+    {
+      "Type": "bind",
+      "Source": "__RUNTRUE_STATE_DIR__/autoscaler/runtime-assets/wasm/runtime.key",
+      "Target": "/run/runtrue-wasm/runtime.key",
+      "ReadOnly": true
+    },
+    {
+      "Type": "bind",
+      "Source": "__RUNTRUE_STATE_DIR__/autoscaler/runtime-assets/oci/image-store",
+      "Target": "/var/lib/runtrue-igh-oci/image-store",
+      "ReadOnly": false
+    },
+    {
+      "Type": "bind",
+      "Source": "__RUNTRUE_STATE_DIR__/autoscaler/runtime-assets/oci/manifests",
+      "Target": "/var/lib/runtrue-igh-oci/manifests",
+      "ReadOnly": true
+    },
+    {
+      "Type": "bind",
+      "Source": "__RUNTRUE_STATE_DIR__/autoscaler/runtime-assets/oci/image-keys",
+      "Target": "/var/lib/runtrue-igh-oci/image-keys",
+      "ReadOnly": true
+    },
+    {
+      "Type": "bind",
+      "Source": "__RUNTRUE_STATE_DIR__/autoscaler/runtime-assets/oci/runtime-environment.json",
+      "Target": "/var/lib/runtrue-igh-oci/runtime-environment.json",
+      "ReadOnly": true
+    },
+    {
+      "Type": "bind",
+      "Source": "__RUNTRUE_STATE_DIR__/autoscaler/runtime-assets/oci/seccomp.json",
+      "Target": "/var/lib/runtrue-igh-oci/seccomp.json",
+      "ReadOnly": true
+    }
+  ]
+}

@@ -36,6 +36,7 @@ mod tests {
                 signer: ComponentHealth::Ready,
                 webhook: ComponentHealth::Ready,
                 callback: ComponentHealth::Ready,
+                action_builder: ComponentHealth::Ready,
             },
             installations: vec![GitHubInstallationView {
                 installation_id: 7,
@@ -114,6 +115,7 @@ mod tests {
         );
         assert_eq!(payload["github"]["events"][0]["deliveryId"], "delivery-1");
         assert_eq!(payload["github"]["events"][0]["repositoryId"], "repo-9");
+        assert_eq!(payload["github"]["health"]["actionBuilder"], "Ready");
         assert_eq!(
             payload["github"]["events"][0]["processingStatus"],
             "pending"

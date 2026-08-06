@@ -71,6 +71,7 @@
           <div><p class="eyebrow">GitHub Actions control plane</p><h1 tabindex="-1">Control plane</h1><p class="page-description">Authenticated GitHub events become policy-bound executions on enrolled runners.</p></div>
           <button class="btn btn-primary overview-primary-action" id="overview-primary-action" type="button">Review approvals</button>
         </header>
+        <aside class="integration-notice capability-notice" data-action-builder-warning aria-live="polite" hidden></aside>
 
         <div class="overview-grid">
           <section class="overview-attention" aria-labelledby="overview-attention-title">
@@ -151,6 +152,7 @@
 
       <main class="workspace-content app-view" data-view="github" data-od-id="github-administration-page" hidden>
         <header class="page-heading"><div><p class="eyebrow">Administration</p><h1 tabindex="-1">GitHub</h1><p class="page-description">GitHub App status and access.</p></div><button class="btn btn-primary btn-inline" id="manage-github" type="button">Manage installation</button></header>
+        <aside class="integration-notice capability-notice" data-action-builder-warning aria-live="polite" hidden></aside>
         <section class="admin-panel"><header class="section-heading"><div><h2>Connection</h2><p>App status.</p></div><span class="state-badge" id="github-overall"></span></header><div class="health-grid" id="github-health"></div><div class="metadata-strip" id="github-metadata"></div></section>
         <section class="admin-panel"><header class="section-heading"><div><h2>Installations</h2><p>Connected GitHub accounts.</p></div><span class="count-badge" id="installation-count"></span></header><div class="table-wrap inset-table" id="installation-content"></div></section>
         <section class="admin-panel"><header class="section-heading"><div><h2>Webhook events</h2><p>Recent events.</p></div><span class="count-badge" id="event-count"></span></header><div class="audit-list" id="event-content"></div></section>

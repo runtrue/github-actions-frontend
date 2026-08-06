@@ -31,6 +31,7 @@ test("serves the full backend-supported POC surface with a strict CSP", async (t
   assert.match(html, /id="overview-attention-list"/);
   assert.match(html, /data-view="repositories"/);
   assert.match(html, /data-view="github"/);
+  assert.equal((html.match(/data-action-builder-warning/g) || []).length, 2);
   assert.match(html, /data-view="runs"/);
   assert.match(html, /data-view="approvals"/);
   assert.match(html, /data-view="repository"/);
@@ -222,6 +223,8 @@ test("repository events keep source metadata grouped and columns aligned", async
   assert.match(html, /<col class="repository-source-column">/);
   assert.match(html, /Verified webhook deliveries and their processing outcomes\./);
   assert.match(script, /class="repository-event-source"/);
+  assert.match(script, /function runsForEvent\(event, runs\)/);
+  assert.match(script, /`\$\{runs\.length\} \$\{runs\.length === 1 \? "run" : "runs"\} created`/);
   assert.match(script, /case "completed":\s*return \{ status: "no_run", label: "No run", detail: "Handled without creating a run" \}/);
   assert.match(script, /case "processing":\s*return \{ status: "processing", label: "Processing", detail: "Handler in progress" \}/);
   assert.match(script, /default:\s*return \{ status: "received", label: "Received", detail: "No handler scheduled" \}/);
@@ -247,6 +250,8 @@ test("repository workflow inventory exposes exact source and compatibility state
   assert.match(script, /<span>Exact commit<\/span>/);
   assert.match(script, /workflow\.compatibilityPercent/);
   assert.match(script, /workflowSourceUrl/);
+  assert.match(script, /Repository action builds unavailable/);
+  assert.match(script, /github\?\.health\?\.actionBuilder === "Ready"/);
   assert.match(script, /No workflows found/);
   assert.match(script, /Could not load workflows/);
   assert.match(styles, /\.workflow-inventory-table \{[^}]*table-layout: fixed;/);

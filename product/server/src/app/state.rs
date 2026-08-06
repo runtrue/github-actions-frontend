@@ -346,6 +346,7 @@ pub struct AppState {
     pub(crate) scm_source_fetcher: Option<Arc<dyn ScmSourceFetcher>>,
     pub(in crate::app) scm_workflow_directory: String,
     pub(in crate::app) scm_default_job_container_image: Option<String>,
+    pub(in crate::app) repository_action_builder_configured: bool,
     pub(in crate::app) human_oidc: Option<Arc<HumanOidcState>>,
     pub(in crate::app) github_installation: Option<Arc<GitHubInstallationState>>,
     pub(in crate::app) github_setup_key: Zeroizing<[u8; 32]>,
@@ -419,6 +420,7 @@ impl AppState {
             scm_source_fetcher: None,
             scm_workflow_directory: DEFAULT_SCM_WORKFLOW_DIRECTORY.to_owned(),
             scm_default_job_container_image: None,
+            repository_action_builder_configured: false,
             human_oidc: None,
             github_installation: None,
             github_setup_key,
@@ -465,6 +467,12 @@ impl AppState {
         }
         self.scm_default_job_container_image = Some(image);
         Ok(self)
+    }
+
+    #[must_use]
+    pub fn with_repository_action_builder_configured(mut self, configured: bool) -> Self {
+        self.repository_action_builder_configured = configured;
+        self
     }
 
     #[must_use]

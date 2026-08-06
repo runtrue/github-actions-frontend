@@ -1150,6 +1150,8 @@ async fn run() -> Result<(), Box<dyn Error + Send + Sync>> {
                         }
                         _ => return Err(StartupError::InvalidRepositoryActionBuilder.into()),
                     };
+                    state =
+                        state.with_repository_action_builder_configured(action_builder.is_some());
                     Some(state.scm_task_worker_with_github_repository_actions(
                         worker_config,
                         tokens,
