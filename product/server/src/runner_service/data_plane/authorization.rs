@@ -8,9 +8,52 @@ use runtrue_model::ContentDigest;
 use runtrue_scheduler::{Lease, LeaseState};
 use runtrue_storage::FsCas;
 use runtrue_workflow_ir::ExecutionCapsule;
-use std::{io::Read as _, sync::Arc};
+use std::{io::Read as _, sync::Arc, time::Duration};
+use tokio::time::{sleep, Instant};
 use tonic::Status;
+
+const CONTROL_TRANSITION_POLL_INTERVAL: Duration = Duration::from_millis(5);
+
 impl RunnerControlService {
+    async fn await_broker_session_state(
+        &self,
+        session: &RunnerSession,
+        execution_lease_id: &str,
+        fencing_generation: u64,
+        job_attempt: u32,
+        step_id: &str,
+    ) -> Result<(), Status> {
+        // Control messages and unary broker requests use different HTTP/2
+        // streams. Preserve every authorization check while tolerating a
+        // broker request that overtakes its accepted-lease or running-step
+        // transition in transit.
+        let deadline = Instant::now() + self.inner.config.stream_send_timeout;
+        loop {
+            let pending = {
+                let state = session.state()?;
+                let accepted = state.accepted.get(execution_lease_id) == Some(&fencing_generation);
+                let offered = state.offered.get(execution_lease_id) == Some(&fencing_generation);
+                let running = state
+                    .running_steps
+                    .get(&(execution_lease_id.to_owned(), job_attempt))
+                    .map(String::as_str)
+                    == Some(step_id);
+                if accepted && running {
+                    return Ok(());
+                }
+                offered || accepted
+            };
+            if !pending || Instant::now() >= deadline {
+                break;
+            }
+            sleep(CONTROL_TRANSITION_POLL_INTERVAL).await;
+        }
+        require_session_lease(session, execution_lease_id, fencing_generation, true)?;
+        Err(Status::failed_precondition(
+            "broker request requires the declared step to be currently running",
+        ))
+    }
+
     pub(in crate::runner_service) async fn active_broker_binding(
         &self,
         authenticated: &AuthenticatedIdentity,
@@ -24,7 +67,6 @@ impl RunnerControlService {
         validate_identifier_status("job id", wire_job_id)?;
         validate_identifier_status("step id", step_id)?;
         let session = self.authenticated_session(authenticated)?;
-        require_session_lease(&session, execution_lease_id, fencing_generation, true)?;
         let lease = self
             .bound_lease(
                 &authenticated.runner_id,
@@ -32,7 +74,7 @@ impl RunnerControlService {
                 fencing_generation,
             )
             .await?;
-        if lease.state != LeaseState::Active {
+        if !matches!(lease.state, LeaseState::Offered | LeaseState::Active) {
             return Err(Status::failed_precondition(
                 "runner brokers require an active accepted lease",
             ));
@@ -50,15 +92,24 @@ impl RunnerControlService {
         }
         self.require_declared_attempt_step(&lease, job_attempt, step_id)
             .await?;
-        if session
-            .state()?
-            .running_steps
-            .get(&(execution_lease_id.to_owned(), job_attempt))
-            .map(String::as_str)
-            != Some(step_id)
-        {
+        self.await_broker_session_state(
+            &session,
+            execution_lease_id,
+            fencing_generation,
+            job_attempt,
+            step_id,
+        )
+        .await?;
+        let lease = self
+            .bound_lease(
+                &authenticated.runner_id,
+                execution_lease_id,
+                fencing_generation,
+            )
+            .await?;
+        if lease.state != LeaseState::Active {
             return Err(Status::failed_precondition(
-                "broker request requires the declared step to be currently running",
+                "runner brokers require an active accepted lease",
             ));
         }
         Ok((session, lease))
