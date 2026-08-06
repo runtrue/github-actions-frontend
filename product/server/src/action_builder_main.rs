@@ -19,6 +19,7 @@ const MAX_REQUEST_BYTES: u64 = 64 * 1024;
 const MAX_METADATA_BYTES: u64 = 256 * 1024;
 const MAX_DOCKERFILE_BYTES: u64 = 1024 * 1024;
 const MAX_OCI_ARCHIVE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+const MAX_BUILD_ERROR_BYTES: usize = 64 * 1024;
 const NETWORK_NONE_BUILD_POLICY_ID: &str =
     "runtrue.repository-action-build.v2.network-none.pinned-materials";
 const NETWORK_DEFAULT_BUILD_POLICY_ID: &str =
@@ -27,6 +28,8 @@ const DOCKER_BUILD_ENVIRONMENT_ID: &str =
     "runtrue.buildkit.v0.26.2.docker-driver.no-insecure-entitlements";
 const DOCKER_CONTAINER_BUILD_ENVIRONMENT_ID: &str =
     "runtrue.buildkit.v0.26.2.docker-container-driver.no-insecure-entitlements";
+const DOCKER_CONTAINER_HOST_NETWORK_BUILD_ENVIRONMENT_ID: &str =
+    "runtrue.buildkit.v0.26.2.docker-container-host-network-driver.no-insecure-entitlements";
 const MAX_ALLOWED_BASE_IMAGES: usize = 32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -258,7 +261,7 @@ fn handle(args: &Args, stream: &mut UnixStream) -> Result<BuildResponse, String>
     let _ = fs::remove_file(&metadata_path);
     let _ = fs::remove_file(&pending_archive_path);
     let output = format!("type=oci,dest={}", pending_archive_path.display());
-    let status = Command::new(&args.docker)
+    let mut child = Command::new(&args.docker)
         .args(buildx_arguments(
             args,
             &request,
@@ -270,13 +273,30 @@ fn handle(args: &Args, stream: &mut UnixStream) -> Result<BuildResponse, String>
         ))
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
+        .stderr(Stdio::piped())
+        .spawn()
         .map_err(|_| "cannot start isolated BuildKit build".to_owned())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "cannot capture isolated BuildKit build diagnostics".to_owned())?;
+    let diagnostics = std::thread::spawn(move || read_tail(stderr, MAX_BUILD_ERROR_BYTES));
+    let status = child
+        .wait()
+        .map_err(|_| "cannot wait for isolated BuildKit build".to_owned())?;
+    let diagnostics = diagnostics
+        .join()
+        .map_err(|_| "cannot capture isolated BuildKit build diagnostics".to_owned())?
+        .map_err(|_| "cannot read isolated BuildKit build diagnostics".to_owned())?;
     if !status.success() {
         let _ = fs::remove_file(&metadata_path);
         let _ = fs::remove_file(&pending_archive_path);
-        return Err("isolated BuildKit build failed".to_owned());
+        let detail = build_failure_detail(&diagnostics);
+        return Err(if detail.is_empty() {
+            "isolated BuildKit build failed".to_owned()
+        } else {
+            format!("isolated BuildKit build failed: {detail}")
+        });
     }
     let metadata = read_bounded(&metadata_path, MAX_METADATA_BYTES)?;
     let _ = fs::remove_file(&metadata_path);
@@ -401,6 +421,7 @@ fn validate_args(args: &Args) -> Result<(), String> {
         || ![
             DOCKER_BUILD_ENVIRONMENT_ID,
             DOCKER_CONTAINER_BUILD_ENVIRONMENT_ID,
+            DOCKER_CONTAINER_HOST_NETWORK_BUILD_ENVIRONMENT_ID,
         ]
         .contains(&args.build_environment_id.as_str())
         || allowed_base_images.is_empty()
@@ -448,6 +469,8 @@ fn buildx_arguments(
         OsString::from("build"),
         OsString::from("--builder"),
         OsString::from(&args.buildx_builder),
+        OsString::from("--progress"),
+        OsString::from("plain"),
         OsString::from("--platform"),
         OsString::from(&request.platform),
         OsString::from("--network"),
@@ -702,6 +725,54 @@ fn read_bounded(path: &Path, limit: u64) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
+fn read_tail(mut reader: impl Read, limit: usize) -> std::io::Result<Vec<u8>> {
+    let mut tail = Vec::with_capacity(limit);
+    let mut chunk = [0_u8; 8192];
+    loop {
+        let count = reader.read(&mut chunk)?;
+        if count == 0 {
+            return Ok(tail);
+        }
+        if count >= limit {
+            tail.clear();
+            tail.extend_from_slice(&chunk[count - limit..count]);
+            continue;
+        }
+        let overflow = tail.len().saturating_add(count).saturating_sub(limit);
+        if overflow > 0 {
+            tail.drain(..overflow);
+        }
+        tail.extend_from_slice(&chunk[..count]);
+    }
+}
+
+fn build_failure_detail(stderr: &[u8]) -> String {
+    let output = String::from_utf8_lossy(stderr);
+    let detail = output
+        .lines()
+        .rev()
+        .map(str::trim)
+        .find(|line| line.starts_with("ERROR:"))
+        .or_else(|| {
+            output
+                .lines()
+                .rev()
+                .map(str::trim)
+                .find(|line| !line.is_empty())
+        })
+        .unwrap_or_default();
+    detail
+        .chars()
+        .map(|character| {
+            if character.is_ascii_control() {
+                ' '
+            } else {
+                character
+            }
+        })
+        .collect()
+}
+
 fn reject_symlink_path(root: &Path, target: &Path) -> Result<(), String> {
     if !target.starts_with(root) {
         return Err("Dockerfile escaped the build context".to_owned());
@@ -875,6 +946,12 @@ mod tests {
         container_driver.build_environment_id = DOCKER_CONTAINER_BUILD_ENVIRONMENT_ID.to_owned();
         assert!(validate_args(&container_driver).is_ok());
         assert_ne!(first, build_cache_id(&container_driver, &request()));
+
+        let mut host_network_driver = container_driver;
+        host_network_driver.build_environment_id =
+            DOCKER_CONTAINER_HOST_NETWORK_BUILD_ENVIRONMENT_ID.to_owned();
+        assert!(validate_args(&host_network_driver).is_ok());
+        assert_ne!(first, build_cache_id(&host_network_driver, &request()));
     }
 
     #[test]
@@ -895,6 +972,9 @@ mod tests {
         assert!(arguments
             .windows(2)
             .any(|window| window == ["--network", "none"]));
+        assert!(arguments
+            .windows(2)
+            .any(|window| window == ["--progress", "plain"]));
         assert!(!arguments
             .iter()
             .any(|argument| argument.contains("network=host")));
@@ -907,6 +987,22 @@ mod tests {
         assert!(arguments
             .iter()
             .any(|argument| argument.starts_with("org.runtrue.material-policy.digest=sha256:")));
+    }
+
+    #[test]
+    fn build_failure_uses_the_final_buildkit_error() {
+        let diagnostics =
+            b"#2 ERROR: request failed\n------\nERROR: failed to solve: DNS unavailable\n";
+        assert_eq!(
+            build_failure_detail(diagnostics),
+            "ERROR: failed to solve: DNS unavailable"
+        );
+        assert_eq!(build_failure_detail(b"\nlast failure\n"), "last failure");
+    }
+
+    #[test]
+    fn diagnostic_capture_keeps_a_bounded_tail() {
+        assert_eq!(read_tail(&b"abcdefgh"[..], 5).unwrap(), b"defgh");
     }
 
     #[test]

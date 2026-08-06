@@ -97,6 +97,12 @@ if syntax.returncode != 0:
     raise SystemExit(f"action builder bootstrap command is invalid: {syntax.stderr.strip()}")
 if "--driver docker-container" not in builder_command:
     raise SystemExit("action builder does not provision an OCI-capable Buildx driver")
+if "--driver-opt network=host" not in builder_command:
+    raise SystemExit("action builder does not give BuildKit access to the host registry route")
+if "grep -Fq 'network=\"host\"'" not in builder_command or "docker buildx rm" not in builder_command:
+    raise SystemExit("action builder does not reconcile an existing bridge-network builder")
+if "docker-container-host-network-driver" not in builder_command:
+    raise SystemExit("action builder does not identify the reviewed host-network BuildKit environment")
 if "--buildx-builder" not in builder_command or "runtrue-test-repository-actions" not in builder_command:
     raise SystemExit("action builder does not use the deployment-scoped Buildx builder")
 if builder.get("environment", {}).get("DOCKER_CONFIG") != "/var/lib/runtrue-action-builder/docker-config":
