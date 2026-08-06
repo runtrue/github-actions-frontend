@@ -66,10 +66,16 @@ services:
     command:
       - |
         install -d -m 0700 /var/lib/runtrue-action-builder/docker-config
+        if /usr/bin/docker buildx inspect "${RUNTRUE_REPOSITORY_ACTION_BUILDX_BUILDER:?run quick-start.sh first}" >/dev/null 2>&1 \
+          && ! /usr/bin/docker buildx inspect "${RUNTRUE_REPOSITORY_ACTION_BUILDX_BUILDER:?run quick-start.sh first}" \
+            | grep -Fq 'network="host"'; then
+          /usr/bin/docker buildx rm "${RUNTRUE_REPOSITORY_ACTION_BUILDX_BUILDER:?run quick-start.sh first}" >/dev/null
+        fi
         if ! /usr/bin/docker buildx inspect "${RUNTRUE_REPOSITORY_ACTION_BUILDX_BUILDER:?run quick-start.sh first}" >/dev/null 2>&1; then
           /usr/bin/docker buildx create \
             --name "${RUNTRUE_REPOSITORY_ACTION_BUILDX_BUILDER:?run quick-start.sh first}" \
-            --driver docker-container >/dev/null
+            --driver docker-container \
+            --driver-opt network=host >/dev/null
         fi
         /usr/bin/docker buildx inspect \
           "${RUNTRUE_REPOSITORY_ACTION_BUILDX_BUILDER:?run quick-start.sh first}" --bootstrap >/dev/null
@@ -82,7 +88,7 @@ services:
           --buildx-builder "${RUNTRUE_REPOSITORY_ACTION_BUILDX_BUILDER:?run quick-start.sh first}" \
           --build-network default \
           --build-policy-id runtrue.repository-action-build.v3.network-default.pinned-materials \
-          --build-environment-id runtrue.buildkit.v0.26.2.docker-container-driver.no-insecure-entitlements \
+          --build-environment-id runtrue.buildkit.v0.26.2.docker-container-host-network-driver.no-insecure-entitlements \
           --allowed-base-image "${RUNTRUE_REPOSITORY_ACTION_ALLOWED_BASE_IMAGES:?run quick-start.sh first}" \
           --admit-command /usr/local/bin/runtrue-action-admitter \
           --socket-gid "${RUNTRUE_RUNTIME_GID:?run quick-start.sh first}"

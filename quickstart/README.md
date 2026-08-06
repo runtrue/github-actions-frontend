@@ -84,7 +84,11 @@ plane resolves an action reference such as
 metadata at that exact commit, and asks `action-builder` to build a Dockerfile
 action only when its immutable build result is not already cached. The builder
 automatically provisions a deployment-scoped Buildx `docker-container` driver
-on the host Docker Engine, exports an OCI archive, and passes it to
+on the host Docker Engine. Its BuildKit daemon uses the host network so private,
+VPN, and enterprise DNS routes available to the host remain reachable while it
+fetches pinned base images. The action's Dockerfile build network remains
+governed separately by the repository-action build policy. The builder exports
+an OCI archive and passes it to
 `action-admission`. The dedicated driver is required because Docker's default
 `docker` driver cannot export OCI archives unless the daemon uses the
 containerd image store. Admission imports the image into the same rootless Podman
