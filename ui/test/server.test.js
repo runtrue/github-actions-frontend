@@ -231,6 +231,28 @@ test("repository events keep source metadata grouped and columns aligned", async
   assert.doesNotMatch(styles, /var\(--space-7\)/);
 });
 
+test("repository workflow inventory exposes exact source and compatibility states", async () => {
+  const [html, styles, script] = await Promise.all([
+    readFile(new URL("../public/index.html", import.meta.url), "utf8"),
+    readFile(new URL("../public/styles.css", import.meta.url), "utf8"),
+    readFile(new URL("../public/app.js", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(html, /data-repository-section="workflows"/);
+  assert.match(html, /data-repository-panel="workflows"/);
+  assert.match(html, /Watched branch and checked for Runtrue compatibility|watched branch and checked for Runtrue compatibility/i);
+  assert.match(html, /id="refresh-repository-workflows"/);
+  assert.match(script, /\/api\/v1\/ui\/repositories\/\$\{encodeURIComponent\(repositoryId\)\}\/workflows/);
+  assert.match(script, /cache: "no-store"/);
+  assert.match(script, /<span>Exact commit<\/span>/);
+  assert.match(script, /workflow\.compatibilityPercent/);
+  assert.match(script, /workflowSourceUrl/);
+  assert.match(script, /No workflows found/);
+  assert.match(script, /Could not load workflows/);
+  assert.match(styles, /\.workflow-inventory-table \{[^}]*table-layout: fixed;/);
+  assert.match(styles, /\.workflow-trigger-list \{[^}]*flex-wrap: wrap;/);
+});
+
 test("login uses a compact centered card", async () => {
   const [html, styles] = await Promise.all([
     readFile(new URL("../public/index.html", import.meta.url), "utf8"),

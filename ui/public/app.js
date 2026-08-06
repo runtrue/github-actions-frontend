@@ -17,6 +17,10 @@
     activeRunDetails: null,
     repositorySettings: null,
     repositorySettingsLoading: false,
+    repositoryWorkflows: null,
+    repositoryWorkflowsLoading: false,
+    repositoryWorkflowsError: "",
+    repositoryWorkflowRequestId: 0,
     repositorySection: "overview",
     repositoryRunsRefreshing: false,
     workspaceSettings: null,
@@ -181,9 +185,9 @@
   function tone(value) {
     const normalized = String(value || "").toLowerCase();
     if (["ready", "active", "online", "succeeded", "approved", "consumed", "good", "success"].includes(normalized)) return "success";
-    if (["failed", "canceled", "timed_out", "lost", "rejected", "error"].includes(normalized)) return "danger";
+    if (["failed", "canceled", "timed_out", "lost", "rejected", "error", "invalid"].includes(normalized)) return "danger";
     if (["running", "queued", "offered", "processing"].includes(normalized)) return "running";
-    if (["pending", "degraded", "missing", "warning", "awaiting event", "needs selection", "draining"].includes(normalized)) return "warning";
+    if (["pending", "degraded", "missing", "warning", "awaiting event", "needs selection", "needs-changes", "draining"].includes(normalized)) return "warning";
     return "neutral";
   }
 
@@ -633,7 +637,7 @@
     byId("audit-result-filter").innerHTML = `<option value="all">All results</option>${results.map((result) => `<option value="${escapeHtml(result)}">${escapeHtml(titleCase(result))}</option>`).join("")}`;
   }
 
-  const repositorySections = new Set(["overview", "runs", "approvals", "secrets", "variables", "settings"]);
+  const repositorySections = new Set(["overview", "workflows", "runs", "approvals", "secrets", "variables", "settings"]);
 
   function repositoryRoute(repository = state.activeRepository, section = state.repositorySection) {
     if (!repository) return "repositories";
@@ -654,7 +658,11 @@
     if (!repository) return false;
     state.activeRepository = repository;
     state.repositorySettings = null;
+    state.repositoryWorkflows = null;
+    state.repositoryWorkflowsError = "";
+    state.repositoryWorkflowRequestId += 1;
     renderRepositorySettings();
+    renderRepositoryWorkflows();
     const runs = (state.data.runs || []).filter((run) => run.repositoryId === repository.id);
     const events = eventsForRepository(repository);
     const approvals = (state.data.approvals || []).filter((approval) => approval.repositoryId === repository.id);
@@ -711,6 +719,77 @@
     byId("repository-approvals-empty").hidden = approvals.length > 0;
   }
 
+  function workflowSourceUrl(repository, commit, path) {
+    if (!repository?.repositoryUrl || !commit || !path) return "";
+    const encodedPath = String(path).split("/").map(encodeURIComponent).join("/");
+    return `${repository.repositoryUrl.replace(/\/$/, "")}/blob/${encodeURIComponent(commit)}/${encodedPath}`;
+  }
+
+  function renderRepositoryWorkflows() {
+    const inventory = state.repositoryWorkflows;
+    const loading = state.repositoryWorkflowsLoading;
+    const error = state.repositoryWorkflowsError;
+    const statePanel = byId("repository-workflows-state");
+    const table = byId("repository-workflows-body").closest("table");
+    const metadata = byId("repository-workflow-metadata");
+    const refresh = byId("refresh-repository-workflows");
+    refresh.disabled = loading;
+    refresh.textContent = loading ? "Refreshing…" : "Refresh workflows";
+    if (!inventory) {
+      table.hidden = true;
+      metadata.hidden = true;
+      statePanel.hidden = false;
+      statePanel.innerHTML = error
+        ? `<h3>Could not load workflows</h3><p>${escapeHtml(error)}</p>`
+        : `<h3>${loading ? "Loading workflows" : "Workflow inventory not loaded"}</h3><p>${loading ? "Refreshing the watched branch and analyzing workflow files." : "Open this section to inspect the watched branch."}</p>`;
+      return;
+    }
+    const workflows = inventory.workflows || [];
+    metadata.hidden = false;
+    const commit = String(inventory.commit || "");
+    metadata.innerHTML = definitionCard("Watched branch", inventory.branch) + `<div><span>Exact commit</span><strong class="mono" title="${escapeHtml(commit)}">${escapeHtml(commit.slice(0, 12))}</strong></div>` + definitionCard("Workflow location", inventory.workflowDirectory) + definitionCard("Workflows", workflows.length);
+    byId("repository-workflows-body").innerHTML = workflows.map((workflow) => {
+      const triggers = workflow.triggers?.length
+        ? `<div class="workflow-trigger-list">${workflow.triggers.map((trigger) => `<span>${escapeHtml(trigger)}</span>`).join("")}</div>`
+        : `<span class="muted-cell">None detected</span>`;
+      const sourceUrl = workflowSourceUrl(state.activeRepository, inventory.commit, workflow.path);
+      const sourceLink = sourceUrl
+        ? `<a class="workflow-source-link" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer" aria-label="View ${escapeHtml(workflow.name)} source on GitHub">View file <span aria-hidden="true">↗</span></a>`
+        : "";
+      const percent = workflow.compatibilityPercent == null ? "Not available" : `${workflow.compatibilityPercent}% compatible`;
+      const sourceKind = workflow.sourceKind === "runtrue" ? "Native Runtrue" : workflow.sourceKind === "github-actions" ? "GitHub Actions" : "Unknown source";
+      return `<tr><td><strong class="table-primary">${escapeHtml(workflow.name)}</strong><small class="mono" title="${escapeHtml(workflow.path)}">${escapeHtml(workflow.path)}</small></td><td>${triggers}</td><td><strong class="workflow-job-count">${escapeHtml(workflow.jobCount)}</strong><small>${escapeHtml(workflow.stepCount)} ${workflow.stepCount === 1 ? "step" : "steps"}</small></td><td><span class="state-badge ${tone(workflow.status)}">${escapeHtml(titleCase(workflow.status))}</span><small title="${escapeHtml(workflow.summary)}">${escapeHtml(percent)} · ${escapeHtml(sourceKind)}</small><p class="workflow-status-summary">${escapeHtml(workflow.summary)}</p></td><td>${sourceLink}</td></tr>`;
+    }).join("");
+    table.hidden = workflows.length === 0;
+    statePanel.hidden = workflows.length > 0;
+    if (!workflows.length) statePanel.innerHTML = `<h3>No workflows found</h3><p>No supported workflow files were found in ${escapeHtml(inventory.workflowDirectory)} on ${escapeHtml(inventory.branch)}.</p>`;
+  }
+
+  async function loadRepositoryWorkflows(force = false) {
+    if (!state.activeRepository || state.repositoryWorkflowsLoading || (state.repositoryWorkflows && !force)) return;
+    const repositoryId = state.activeRepository.id;
+    const requestId = ++state.repositoryWorkflowRequestId;
+    state.repositoryWorkflowsLoading = true;
+    state.repositoryWorkflowsError = "";
+    if (force) state.repositoryWorkflows = null;
+    renderRepositoryWorkflows();
+    try {
+      const response = await fetch(`/api/v1/ui/repositories/${encodeURIComponent(repositoryId)}/workflows`, { credentials: "same-origin", headers: { accept: "application/json" }, cache: "no-store" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.detail || "The watched branch could not be synchronized. Try again.");
+      if (requestId !== state.repositoryWorkflowRequestId || state.activeRepository?.id !== repositoryId) return;
+      state.repositoryWorkflows = payload;
+    } catch (error) {
+      if (requestId !== state.repositoryWorkflowRequestId || state.activeRepository?.id !== repositoryId) return;
+      state.repositoryWorkflowsError = error.message || "Could not load workflows. Try again.";
+    } finally {
+      if (requestId === state.repositoryWorkflowRequestId) {
+        state.repositoryWorkflowsLoading = false;
+        renderRepositoryWorkflows();
+      }
+    }
+  }
+
   function setRepositorySection(section, updateHash = true) {
     if (!repositorySections.has(section)) section = "overview";
     state.repositorySection = section;
@@ -720,6 +799,7 @@
       button.classList.toggle("active", active);
       if (active) button.setAttribute("aria-current", "page"); else button.removeAttribute("aria-current");
     });
+    if (section === "workflows") loadRepositoryWorkflows();
     if (["secrets", "variables", "settings"].includes(section)) loadRepositorySettings();
     if (state.activeRepository) byId("topbar-view-name").textContent = `${state.activeRepository.key} / ${titleCase(section)}`;
     if (updateHash && state.activeRepository) updateRoute(repositoryRoute());
@@ -968,6 +1048,7 @@
       const response = await fetch(`/api/v1/ui/repositories/${encodeURIComponent(state.activeRepository.id)}/workflow-directory`, { method: "POST", body, credentials: "same-origin" });
       if (!response.ok) { const problem = await response.json().catch(() => null); throw new Error(problem?.detail || "Could not save the workflow location."); }
       state.repositorySettings = null;
+      state.repositoryWorkflows = null;
       await loadRepositorySettings(true);
       showToast("Workflow location saved.");
     } catch (error) { showToast(error.message || "The workflow location could not be saved."); }
@@ -1856,6 +1937,7 @@
     document.addEventListener("click", (event) => { const run = event.target.closest("[data-open-run]"); const retry = event.target.closest("[data-retry-run]"); const approval = event.target.closest("[data-open-approval]"); const token = event.target.closest("[data-open-token]"); const secret = event.target.closest("[data-edit-secret]"); const scopedSecret = event.target.closest("[data-edit-scoped-secret]"); const scopedDelete = event.target.closest("[data-delete-scoped-secret]"); const project = event.target.closest("[data-edit-secret-project]"); const deleteSetting = event.target.closest("[data-delete-setting]"); const variable = event.target.closest("[data-edit-variable]"); const team = event.target.closest("[data-edit-team]"); const user = event.target.closest("[data-edit-user]"); if (run) openRun(run.dataset.openRun); if (retry) retryRun(retry.dataset.retryRun, retry); if (approval) openApproval(approval.dataset.openApproval); if (token) openToken(token.dataset.openToken); if (secret) openSetting(secret.dataset.settingScope || "repository", "secret", secret.dataset.editSecret); if (scopedSecret) openScopedSecret(scopedSecret.dataset.editScopedSecret, scopedSecret.dataset.secretScopeKind, scopedSecret.dataset.secretScopeId); if (scopedDelete) openScopedSecretDelete(scopedDelete.dataset.deleteScopedSecret, scopedDelete.dataset.secretScopeKind, scopedDelete.dataset.secretScopeId); if (project) openSecretProject(project.dataset.editSecretProject); if (deleteSetting) openDeleteSetting(deleteSetting.dataset.deleteSetting, deleteSetting.dataset.settingName, deleteSetting.dataset.settingScope || "repository"); if (variable) openSetting(variable.dataset.settingScope || "repository", "variable", variable.dataset.editVariable); if (team) openEditTeam(team.dataset.editTeam); if (user) openEditUser(user.dataset.editUser); });
     byId("back-to-repositories").addEventListener("click", () => switchView("repositories"));
     document.querySelectorAll("[data-repository-section]").forEach((button) => button.addEventListener("click", () => setRepositorySection(button.dataset.repositorySection)));
+    byId("refresh-repository-workflows").addEventListener("click", () => loadRepositoryWorkflows(true));
     byId("refresh-repository-runs").addEventListener("click", refreshRepositoryRuns);
     byId("mobile-menu").addEventListener("click", openNavigation); byId("sidebar-scrim").addEventListener("click", closeNavigation);
     byId("open-add-dialog").addEventListener("click", openAddDialog); byId("manage-github").addEventListener("click", submitInstallAction); byId("dialog-manage-github").addEventListener("click", submitInstallAction); byId("dialog-refresh-github").addEventListener("click", reloadGitHubData);

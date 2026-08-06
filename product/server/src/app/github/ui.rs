@@ -18,6 +18,10 @@ use crate::github_install_ui::{
     GITHUB_BROWSER_API_CACHE_CONTROL,
 };
 use crate::human_oidc::{GitHubUserCatalog, GitHubUserInstallation, HumanOidcError};
+use crate::scm_worker::{
+    load_scm_workflow_inventory, ScmSourceFetchError, ScmSourceFetchRequest,
+    ScmWorkflowInventorySource,
+};
 use axum::body::Bytes;
 use axum::extract::rejection::BytesRejection;
 use axum::extract::{Extension, Path, Query, State};
@@ -39,7 +43,7 @@ use runtrue_policy::{
 use runtrue_scm::{EventEnvelope, ProviderKind};
 use runtrue_secrets::SecretPlaintext;
 use runtrue_workflow_ir::ExecutionCapsule;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -51,6 +55,29 @@ const BROWSER_RUN_LOG_FRAME_LIMIT: usize = 1_000;
 const BROWSER_RUN_LOG_BYTE_LIMIT: usize = 2 * 1024 * 1024;
 const BROWSER_PENDING_APPROVAL_LIMIT: usize = 100;
 const BROWSER_RESOLVED_APPROVAL_LIMIT: usize = 100;
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowserWorkflowInventoryView {
+    branch: String,
+    commit: String,
+    workflow_directory: String,
+    workflows: Vec<BrowserWorkflowView>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowserWorkflowView {
+    path: String,
+    name: String,
+    source_kind: &'static str,
+    status: &'static str,
+    job_count: usize,
+    step_count: usize,
+    compatibility_percent: Option<u8>,
+    triggers: Vec<&'static str>,
+    summary: String,
+}
 
 struct BrowserResponse(Box<Response>);
 
@@ -1007,6 +1034,396 @@ pub(in crate::app) async fn browser_repository_settings(
         .insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
     protect_sensitive_response(&mut response);
     response
+}
+
+pub(in crate::app) async fn browser_repository_workflows(
+    State(state): State<AppState>,
+    Extension(request_id): Extension<RequestId>,
+    headers: HeaderMap,
+    Path(repository_id): Path<String>,
+) -> Response {
+    let now = match now_unix_ms(&request_id) {
+        Ok(now) => now,
+        Err(response) => return response.into_response(),
+    };
+    let (context, _, _) = match authenticated_browser_session(
+        &state,
+        &request_id,
+        &headers,
+        SCM_READ_SCOPE,
+        None,
+        now,
+    )
+    .await
+    {
+        Ok(session) => session,
+        Err(response) => return *response,
+    };
+    if let Err(response) =
+        authorize_browser_tenant(&state, &request_id, &context, CedarAction::ViewRepository).await
+    {
+        return *response;
+    }
+    let repository = match browser_repository(&state, &request_id, &context, &repository_id).await {
+        Ok(repository) => repository,
+        Err(response) => return response.into_response(),
+    };
+    let status = match github_status_service(&state, &context.tenant_id).await {
+        Ok(status) => status,
+        Err(error) => return control_plane_problem(&request_id, error),
+    };
+    let Some(github_repository) = status.repositories.into_iter().find(|candidate| {
+        candidate.linked_repository_id.as_deref() == Some(repository.id.as_str())
+    }) else {
+        return problem_response(
+            &request_id,
+            StatusCode::CONFLICT,
+            "Workflow source unavailable",
+            "this repository is not linked to an active GitHub installation",
+        );
+    };
+    let installation = match state
+        .store
+        .scm_installation_for_tenant(&context.tenant_id, &github_repository.installation_id)
+        .await
+    {
+        Ok(installation) => installation,
+        Err(error) => return control_plane_problem(&request_id, error),
+    };
+    let repository_link = match state
+        .store
+        .github_repository_links_for_tenant(
+            &context.tenant_id,
+            &github_repository.installation_id,
+            None,
+            100,
+        )
+        .await
+    {
+        Ok(links) => links.into_iter().find(|link| {
+            link.repository_id == repository.id
+                && link.external_repository_id == github_repository.external_repository_id
+                && link.status == "active"
+        }),
+        Err(error) => return control_plane_problem(&request_id, error),
+    };
+    let Some(repository_link) = repository_link else {
+        return problem_response(
+            &request_id,
+            StatusCode::CONFLICT,
+            "Workflow source unavailable",
+            "this repository does not have an active source link",
+        );
+    };
+    let workflow_directory = match state
+        .store
+        .repository_workflow_directory(&context.tenant_id, &repository.id)
+        .await
+    {
+        Ok(Some(directory)) => directory,
+        Ok(None) => state.scm_workflow_directory.clone(),
+        Err(error) => return control_plane_problem(&request_id, error),
+    };
+    let Some(fetcher) = state.scm_source_fetcher.clone() else {
+        return problem_response(
+            &request_id,
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Workflow inventory unavailable",
+            "SCM source synchronization is not configured",
+        );
+    };
+    let request = ScmSourceFetchRequest {
+        installation,
+        repository: repository_link,
+        tenant_id: context.tenant_id,
+        repository_id: repository.id,
+        owner: github_repository.owner,
+        name: github_repository.name,
+        source_commit: String::new(),
+        base_commit: None,
+    };
+    let branch = github_repository.default_branch;
+    let inventory_directory = workflow_directory.clone();
+    let default_job_container_image = state.scm_default_job_container_image.clone();
+    let inventory = tokio::task::spawn_blocking(move || {
+        let inventory =
+            load_scm_workflow_inventory(fetcher.as_ref(), request, &branch, &inventory_directory)?;
+        let workflows = inventory
+            .workflows
+            .into_iter()
+            .map(|source| analyze_workflow_source(source, default_job_container_image.as_deref()))
+            .collect();
+        Ok::<_, ScmSourceFetchError>(BrowserWorkflowInventoryView {
+            branch: inventory.branch,
+            commit: inventory.commit,
+            workflow_directory: inventory_directory,
+            workflows,
+        })
+    });
+    let inventory = match tokio::time::timeout(state.request_timeout, inventory).await {
+        Ok(Ok(Ok(inventory))) => inventory,
+        Ok(Ok(Err(ScmSourceFetchError::CredentialUnavailable))) => {
+            return problem_response(
+                &request_id,
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Workflow inventory unavailable",
+                "the GitHub installation credential is unavailable; synchronize the installation and try again",
+            );
+        }
+        Ok(Ok(Err(ScmSourceFetchError::BindingMismatch | ScmSourceFetchError::Rejected))) => {
+            return problem_response(
+                &request_id,
+                StatusCode::BAD_GATEWAY,
+                "Workflow source rejected",
+                "the watched repository source could not be verified",
+            );
+        }
+        Ok(Ok(Err(ScmSourceFetchError::Unavailable))) | Err(_) => {
+            return problem_response(
+                &request_id,
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Could not refresh workflows",
+                "the watched branch could not be synchronized; try again",
+            );
+        }
+        Ok(Err(_)) => return internal_problem(&request_id),
+    };
+    let mut response = Json(inventory).into_response();
+    response
+        .headers_mut()
+        .insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    protect_sensitive_response(&mut response);
+    response
+}
+
+fn analyze_workflow_source(
+    source: ScmWorkflowInventorySource,
+    default_job_container_image: Option<&str>,
+) -> BrowserWorkflowView {
+    let fallback_name = workflow_path_name(&source.path);
+    let Ok(text) = std::str::from_utf8(&source.bytes) else {
+        return invalid_workflow_view(source.path, fallback_name, "Workflow source is not UTF-8.");
+    };
+    let is_external = crate::workflow_frontends::registry()
+        .frontend_for(&source.path)
+        .ok()
+        .flatten()
+        .is_some();
+    if !is_external {
+        return match runtrue_workflow_ast::parse_yaml(text) {
+            Ok(workflow) => {
+                let step_count = workflow.jobs.values().map(|job| job.steps.len()).sum();
+                BrowserWorkflowView {
+                    path: source.path,
+                    name: workflow.name.unwrap_or(fallback_name),
+                    source_kind: "runtrue",
+                    status: "ready",
+                    job_count: workflow.jobs.len(),
+                    step_count,
+                    compatibility_percent: Some(100),
+                    triggers: workflow_trigger_labels(&workflow.triggers),
+                    summary: "Native Runtrue workflow.".to_owned(),
+                }
+            }
+            Err(_) => invalid_workflow_view(
+                source.path,
+                fallback_name,
+                "Native workflow syntax could not be parsed.",
+            ),
+        };
+    }
+    #[cfg(feature = "github-actions")]
+    {
+        let options = match crate::workflow_frontends::options(default_job_container_image) {
+            Ok(options) => options,
+            Err(_) => {
+                return invalid_workflow_view(
+                    source.path,
+                    fallback_name,
+                    "Workflow analysis is not configured correctly.",
+                );
+            }
+        };
+        let imported = match runtrue_gha_import::import_github_actions_with_options(
+            text,
+            source.path.clone(),
+            options,
+        ) {
+            Ok(imported) => imported,
+            Err(_) => {
+                return invalid_workflow_view(
+                    source.path,
+                    fallback_name,
+                    "GitHub Actions syntax could not be analyzed.",
+                );
+            }
+        };
+        let report = imported.report;
+        let github_triggers = github_workflow_trigger_labels(text);
+        let (name, triggers) = imported.native_yaml.as_deref().map_or_else(
+            || (fallback_name.clone(), github_triggers.clone()),
+            |yaml| match runtrue_workflow_ast::parse_yaml(yaml) {
+                Ok(workflow) => (
+                    workflow.name.unwrap_or_else(|| fallback_name.clone()),
+                    workflow_trigger_labels(&workflow.triggers),
+                ),
+                Err(_) => (fallback_name.clone(), Vec::new()),
+            },
+        );
+        let (status, summary) = if report.compatible {
+            ("ready", "Compatible with Runtrue.".to_owned())
+        } else {
+            let change_count = report.required_changes.len();
+            let summary = report.required_changes.first().map_or_else(
+                || "This workflow uses unsupported GitHub Actions features.".to_owned(),
+                |first| {
+                    format!(
+                        "{change_count} required {}. {first}",
+                        if change_count == 1 {
+                            "change"
+                        } else {
+                            "changes"
+                        }
+                    )
+                },
+            );
+            ("needs-changes", summary)
+        };
+        BrowserWorkflowView {
+            path: source.path,
+            name,
+            source_kind: "github-actions",
+            status,
+            job_count: report.mapped_jobs,
+            step_count: report.mapped_steps,
+            compatibility_percent: Some(report.overall_compatibility_percent),
+            triggers,
+            summary,
+        }
+    }
+    #[cfg(not(feature = "github-actions"))]
+    {
+        let _ = default_job_container_image;
+        invalid_workflow_view(
+            source.path,
+            fallback_name,
+            "GitHub Actions support is not enabled on this server.",
+        )
+    }
+}
+
+fn invalid_workflow_view(path: String, name: String, summary: &'static str) -> BrowserWorkflowView {
+    BrowserWorkflowView {
+        path,
+        name,
+        source_kind: "unknown",
+        status: "invalid",
+        job_count: 0,
+        step_count: 0,
+        compatibility_percent: None,
+        triggers: Vec::new(),
+        summary: summary.to_owned(),
+    }
+}
+
+fn workflow_path_name(path: &str) -> String {
+    path.rsplit('/').next().map_or_else(
+        || "Workflow".to_owned(),
+        |file| {
+            file.trim_end_matches(".yaml")
+                .trim_end_matches(".yml")
+                .replace(['-', '_'], " ")
+        },
+    )
+}
+
+fn workflow_trigger_labels(triggers: &runtrue_workflow_ast::Triggers) -> Vec<&'static str> {
+    let mut labels = Vec::new();
+    if triggers.push.is_some() {
+        labels.push("Push");
+    }
+    if triggers.pull_request.is_some() {
+        labels.push("Pull request");
+    }
+    if triggers.pull_request_target.is_some() {
+        labels.push("Pull request target");
+    }
+    if triggers.issue_comment.is_some() {
+        labels.push("Issue comment");
+    }
+    if triggers.check_run.is_some() {
+        labels.push("Check run");
+    }
+    if triggers.merge_queue.is_some() {
+        labels.push("Merge queue");
+    }
+    if !triggers.schedule.is_empty() {
+        labels.push("Schedule");
+    }
+    if triggers.manual.is_some() {
+        labels.push("Manual");
+    }
+    if triggers.api.is_some() {
+        labels.push("API");
+    }
+    labels
+}
+
+#[cfg(feature = "github-actions")]
+fn github_workflow_trigger_labels(source: &str) -> Vec<&'static str> {
+    let Ok(document) = serde_yaml::from_str::<serde_yaml::Value>(source) else {
+        return Vec::new();
+    };
+    let Some(on) = document
+        .as_mapping()
+        .and_then(|mapping| mapping.get(serde_yaml::Value::String("on".to_owned())))
+    else {
+        return Vec::new();
+    };
+    let names = match on {
+        serde_yaml::Value::String(name) => vec![name.as_str()],
+        serde_yaml::Value::Sequence(names) => {
+            names.iter().filter_map(serde_yaml::Value::as_str).collect()
+        }
+        serde_yaml::Value::Mapping(events) => events
+            .keys()
+            .filter_map(serde_yaml::Value::as_str)
+            .collect(),
+        _ => Vec::new(),
+    };
+    let mut labels = names
+        .into_iter()
+        .filter_map(github_trigger_label)
+        .collect::<Vec<_>>();
+    labels.sort_unstable();
+    labels.dedup();
+    labels
+}
+
+#[cfg(feature = "github-actions")]
+fn github_trigger_label(event: &str) -> Option<&'static str> {
+    match event {
+        "push" => Some("Push"),
+        "pull_request" => Some("Pull request"),
+        "pull_request_target" => Some("Pull request target"),
+        "issue_comment" => Some("Issue comment"),
+        "issues" => Some("Issues"),
+        "check_run" => Some("Check run"),
+        "check_suite" => Some("Check suite"),
+        "merge_group" => Some("Merge queue"),
+        "schedule" => Some("Schedule"),
+        "workflow_dispatch" => Some("Manual"),
+        "repository_dispatch" => Some("Repository dispatch"),
+        "workflow_call" => Some("Workflow call"),
+        "workflow_run" => Some("Workflow run"),
+        "release" => Some("Release"),
+        "deployment" => Some("Deployment"),
+        "deployment_status" => Some("Deployment status"),
+        "pull_request_review" => Some("Pull request review"),
+        "pull_request_review_comment" => Some("Pull request review comment"),
+        "status" => Some("Status"),
+        _ => None,
+    }
 }
 
 pub(in crate::app) async fn save_browser_repository_auto_approval(
@@ -3945,6 +4362,77 @@ mod user_catalog_tests {
         ApprovalRequirements, CapsuleContext, ParityGrade, PermissionSet, SourceTrust,
         WorkflowIdentity, CAPSULE_SCHEMA_VERSION, ENGINE_COMPATIBILITY_VERSION,
     };
+
+    #[test]
+    fn native_workflow_inventory_reports_name_triggers_and_workload_size() {
+        let view = analyze_workflow_source(
+            ScmWorkflowInventorySource {
+                path: ".runtrue/workflows/verify.yaml".to_owned(),
+                bytes: b"version: 1\nname: Verify\non:\n  push: {}\n  manual: {}\njobs:\n  test:\n    steps:\n      - run:\n          command: [\"true\"]\n"
+                    .to_vec(),
+            },
+            None,
+        );
+
+        assert_eq!(view.name, "Verify");
+        assert_eq!(view.status, "ready");
+        assert_eq!(view.source_kind, "runtrue");
+        assert_eq!(view.job_count, 1);
+        assert_eq!(view.step_count, 1);
+        assert_eq!(view.triggers, vec!["Push", "Manual"]);
+    }
+
+    #[test]
+    fn malformed_native_workflow_is_visible_as_invalid() {
+        let view = analyze_workflow_source(
+            ScmWorkflowInventorySource {
+                path: ".runtrue/workflows/broken.yaml".to_owned(),
+                bytes: b"version: [not valid".to_vec(),
+            },
+            None,
+        );
+
+        assert_eq!(view.name, "broken");
+        assert_eq!(view.status, "invalid");
+        assert_eq!(view.compatibility_percent, None);
+    }
+
+    #[cfg(feature = "github-actions")]
+    #[test]
+    fn github_actions_inventory_reports_compatibility() {
+        let image = format!("registry.example/runtrue/job@sha256:{}", "a".repeat(64));
+        let view = analyze_workflow_source(
+            ScmWorkflowInventorySource {
+                path: ".github/workflows/ci.yml".to_owned(),
+                bytes: b"name: CI\non: push\njobs:\n  test:\n    runs-on: ubuntu-24.04\n    steps:\n      - run: echo ok\n"
+                    .to_vec(),
+            },
+            Some(&image),
+        );
+
+        assert_eq!(view.name, "CI");
+        assert_eq!(view.status, "ready");
+        assert_eq!(view.source_kind, "github-actions");
+        assert_eq!(view.job_count, 1);
+        assert_eq!(view.step_count, 1);
+        assert_eq!(view.triggers, vec!["Push"]);
+    }
+
+    #[cfg(feature = "github-actions")]
+    #[test]
+    fn incompatible_github_workflow_still_reports_its_triggers() {
+        let view = analyze_workflow_source(
+            ScmWorkflowInventorySource {
+                path: ".github/workflows/windows.yml".to_owned(),
+                bytes: b"name: Windows\non: [pull_request, workflow_dispatch]\njobs:\n  test:\n    runs-on: windows-latest\n    steps:\n      - run: echo ok\n"
+                    .to_vec(),
+            },
+            None,
+        );
+
+        assert_eq!(view.status, "needs-changes");
+        assert_eq!(view.triggers, vec!["Manual", "Pull request"]);
+    }
 
     #[test]
     fn run_source_links_to_the_originating_pull_request() {

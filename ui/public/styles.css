@@ -886,6 +886,27 @@ svg { display: block; }
 .repository-event-table td:nth-child(3) small { display: block; }
 .repository-event-table th:last-child,
 .repository-event-table .date-cell { text-align: right; white-space: nowrap; }
+.workflow-inventory-meta { margin-bottom: var(--space-4); padding: var(--space-3) var(--space-4); border-block: 1px solid var(--border); display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-4); }
+.workflow-inventory-meta > div { min-width: 0; display: grid; gap: 2px; }
+.workflow-inventory-meta span { color: var(--muted); font-size: 10px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.workflow-inventory-meta strong { overflow: hidden; font-size: var(--text-sm); text-overflow: ellipsis; white-space: nowrap; }
+.workflow-inventory-wrap { background: var(--surface); }
+.workflow-inventory-table { min-width: 860px; table-layout: fixed; }
+.workflow-inventory-table th:nth-child(1) { width: 26%; }
+.workflow-inventory-table th:nth-child(2) { width: 23%; }
+.workflow-inventory-table th:nth-child(3) { width: 10%; }
+.workflow-inventory-table th:nth-child(4) { width: 31%; }
+.workflow-inventory-table th:nth-child(5) { width: 10%; }
+.workflow-inventory-table td { vertical-align: top; }
+.workflow-inventory-table td > small { display: block; margin-top: var(--space-1); color: var(--muted); font-size: var(--text-xs); overflow-wrap: anywhere; }
+.workflow-inventory-table td:first-child small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workflow-trigger-list { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.workflow-trigger-list span { padding: 3px var(--space-2); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); color: var(--fg); font-size: 11px; white-space: nowrap; }
+.workflow-job-count { display: block; font-size: var(--text-lg); line-height: 1.2; }
+.workflow-status-summary { max-width: 44ch; margin: var(--space-2) 0 0; color: var(--muted); font-size: var(--text-xs); line-height: 1.45; }
+.workflow-source-link { display: inline-flex; align-items: center; gap: var(--space-1); color: var(--accent); font-size: var(--text-xs); font-weight: 600; text-decoration: none; white-space: nowrap; }
+.workflow-source-link:hover { text-decoration: underline; }
+.workflow-source-link:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .repository-settings-card { margin-bottom: var(--space-6); padding: var(--space-6); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); }
 .repository-settings-card h3 { margin: 0 0 var(--space-2); font-size: var(--text-lg); }
 .repository-settings-card p { margin: 0; color: var(--muted); font-size: var(--text-sm); }
@@ -1169,6 +1190,7 @@ svg { display: block; }
   .workflow-triggers { max-width: none; justify-content: flex-start; }
   .job-meta { grid-template-columns: 1fr; }
   .repository-meta { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
+  .workflow-inventory-meta { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .audit-toolbar { align-items: stretch; flex-direction: column; }
   .audit-search,
   .audit-toolbar .select-field { min-width: 0; flex-basis: auto; }

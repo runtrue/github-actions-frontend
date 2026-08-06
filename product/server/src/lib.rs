@@ -47,11 +47,12 @@ pub use runner_service::{
 #[cfg(feature = "github-actions")]
 pub use scm_worker::GitHubRepositoryActionResolver;
 pub use scm_worker::{
-    FetchedScmRepository, GitHubAppInstallationTokenProvider, GitHubCheckPublisher,
-    GitHubInstallationTokenProvider, GitHubMirrorSourceFetcher, GitHubRepositoryAccessToken,
-    MirrorPathError, PreparedRepositoryAction, PublishedScmCheck, RepositoryActionBuildRequest,
-    RepositoryActionBuilder, RepositoryActionResolveError, RepositoryActionResolver,
-    ScmCheckPublishError, ScmSourceFetchError, ScmSourceFetchRequest, ScmSourceFetcher,
-    ScmTaskWorker, ScmWorkerBuildError, ScmWorkerConfig, ScmWorkerError, ScmWorkerMetricsSnapshot,
-    ScmWorkerTick, DEFAULT_SCM_WORKFLOW_DIRECTORY,
+    load_scm_workflow_inventory, FetchedScmRepository, GitHubAppInstallationTokenProvider,
+    GitHubCheckPublisher, GitHubInstallationTokenProvider, GitHubMirrorSourceFetcher,
+    GitHubRepositoryAccessToken, MirrorPathError, PreparedRepositoryAction, PublishedScmCheck,
+    RepositoryActionBuildRequest, RepositoryActionBuilder, RepositoryActionResolveError,
+    RepositoryActionResolver, ScmCheckPublishError, ScmSourceFetchError, ScmSourceFetchRequest,
+    ScmSourceFetcher, ScmTaskWorker, ScmWorkerBuildError, ScmWorkerConfig, ScmWorkerError,
+    ScmWorkerMetricsSnapshot, ScmWorkerTick, ScmWorkflowInventory, ScmWorkflowInventorySource,
+    DEFAULT_SCM_WORKFLOW_DIRECTORY,
 };
