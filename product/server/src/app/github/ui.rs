@@ -2787,6 +2787,11 @@ async fn github_browser_state_response(
             } else {
                 ComponentHealth::Missing
             },
+            action_builder: if state.repository_action_builder_configured {
+                ComponentHealth::Ready
+            } else {
+                ComponentHealth::Missing
+            },
         },
         installations,
         repositories,
@@ -4560,6 +4565,7 @@ mod user_catalog_tests {
                 signer: ComponentHealth::Ready,
                 webhook: ComponentHealth::Ready,
                 callback: ComponentHealth::Ready,
+                action_builder: ComponentHealth::Ready,
             },
             installations: Vec::new(),
             repositories: vec![GitHubRepositoryLinkView {
@@ -4643,6 +4649,7 @@ mod user_catalog_tests {
                 signer: ComponentHealth::Ready,
                 webhook: ComponentHealth::Ready,
                 callback: ComponentHealth::Ready,
+                action_builder: ComponentHealth::Ready,
             },
             installations: Vec::new(),
             repositories: Vec::new(),
@@ -4699,6 +4706,7 @@ mod user_catalog_tests {
                 signer: ComponentHealth::Ready,
                 webhook: ComponentHealth::Ready,
                 callback: ComponentHealth::Ready,
+                action_builder: ComponentHealth::Ready,
             },
             installations: vec![GitHubInstallationView {
                 installation_id: 42_417,

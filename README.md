@@ -43,6 +43,15 @@ quick-start process. Quick-start deployments should use Runtrue's existing
 autoscaler and provider runtime to launch ephemeral runners from queued demand;
 they must not embed a separate fixed-runner lifecycle in this product binary.
 
+## Complete clean-host deployment
+
+[`quickstart/README.md`](quickstart/README.md) contains the single-Compose
+clean-host deployment. It installs the GitHub App signer, browser frontend,
+control plane, repository-action builder and signed OCI admission helper, and
+the Docker autoscaler with combined ephemeral Wasm/OCI runners. The installer
+is safe to rerun and fails if a required repository-action capability is
+missing instead of starting a partially capable stack.
+
 The pinned Runtrue core revision is available to anonymous clean checkouts.
 
 ## Development

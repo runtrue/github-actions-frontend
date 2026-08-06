@@ -97,6 +97,7 @@ pub fn github_installations_payload(page: &GitHubInstallationsPage) -> Value {
                 "signer": page.app.signer.label(),
                 "webhook": page.app.webhook.label(),
                 "callback": page.app.callback.label(),
+                "actionBuilder": page.app.action_builder.label(),
             },
             "metadata": {
                 "providerHost": page.app.provider_host,

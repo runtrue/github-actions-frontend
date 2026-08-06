@@ -47,3 +47,6 @@ jobs:
         run: |
           node --check ui/public/app.js
           node --test ui/test/server.test.js
+
+      - name: Validate complete quick-start deployment
+        run: quickstart/tests/validate.sh
