@@ -54,15 +54,19 @@ runner_binary_digest() {
 
 install_runtime_bundle() {
   local image=$1 destination=$2 temporary container backup='' preserved_key='' bundle_complete
+  local bundle_image_id installed_bundle_image_id=''
   local -a required_directories=(
     wasm/components wasm/manifests wasm/keys
     oci/image-store oci/manifests oci/image-keys
   )
   local -a required_files=(
     wasm/runtime.key oci/runtime-environment.json oci/seccomp.json
-    oci/.deployment-local-store-v3
+    oci/.deployment-local-store-v3 .bundle-image-id
   )
   docker pull "$image" >/dev/null
+  bundle_image_id=$(docker image inspect "$image" --format '{{.Id}}')
+  [[ "$bundle_image_id" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+    die "runtime bundle image did not resolve to an exact image ID: ${image}"
   if [[ -e "$destination" || -L "$destination" ]]; then
     [[ -d "$destination" && ! -L "$destination" ]] || die "unsafe runtime bundle destination: ${destination}"
     bundle_complete=true
@@ -72,14 +76,19 @@ install_runtime_bundle() {
     for path in "${required_files[@]}"; do
       [[ -f "${destination}/${path}" && ! -L "${destination}/${path}" ]] || bundle_complete=false
     done
-    if "$bundle_complete" && [[ "$(stat -c '%s' -- "${destination}/wasm/runtime.key")" == 64 ]]; then
+    if [[ -f "${destination}/.bundle-image-id" && ! -L "${destination}/.bundle-image-id" ]]; then
+      installed_bundle_image_id=$(tr -d '\r\n' <"${destination}/.bundle-image-id")
+    fi
+    if "$bundle_complete" &&
+      [[ "$(stat -c '%s' -- "${destination}/wasm/runtime.key")" == 64 ]] &&
+      [[ "$installed_bundle_image_id" == "$bundle_image_id" ]]; then
       return
     fi
     if [[ -f "${destination}/wasm/runtime.key" && ! -L "${destination}/wasm/runtime.key" &&
           "$(stat -c '%s' -- "${destination}/wasm/runtime.key")" == 64 ]]; then
       preserved_key="${destination}/wasm/runtime.key"
     fi
-    printf 'quick-start: repairing incomplete runner runtime bundle at %s\n' "$destination" >&2
+    printf 'quick-start: refreshing stale or incomplete runner runtime bundle at %s\n' "$destination" >&2
   fi
   temporary=$(mktemp -d -- "${RUNTRUE_STATE_DIR}/autoscaler/.runtime-assets.XXXXXXXX")
   container=$(docker create "$image" /)
@@ -112,6 +121,7 @@ install_runtime_bundle() {
     "${temporary}/oci/manifests" \
     "${temporary}/oci/image-keys"
   : >"${temporary}/oci/.deployment-local-store-v3"
+  printf '%s\n' "$bundle_image_id" >"${temporary}/.bundle-image-id"
   if [[ -n "$preserved_key" ]]; then
     install -m 0600 -- "$preserved_key" "${temporary}/wasm/runtime.key"
   else
@@ -643,7 +653,7 @@ done
 ((RUNTRUE_EDGE_HTTP_PORT <= 65535 && RUNTRUE_EDGE_HTTPS_PORT <= 65535)) ||
   die 'edge ports must not exceed 65535'
 
-for command in awk basename cmp cp diff docker env find grep install mktemp mv openssl python3 realpath sed sha256sum stat tail; do
+for command in awk basename cmp cp diff docker env find grep install mktemp mv openssl python3 realpath sed sha256sum stat tail tr; do
   command -v "$command" >/dev/null 2>&1 || die "required command not found: ${command}"
 done
 docker compose version >/dev/null 2>&1 || die 'Docker Compose v2 is required'
