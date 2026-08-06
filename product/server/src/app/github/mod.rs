@@ -17,9 +17,10 @@ pub(in crate::app) use ui::{
     delete_browser_repository_variable, github_browser_state, github_catalog_organizations,
     github_catalog_repositories, import_github_installation_from_ui,
     link_github_repository_from_ui, save_browser_organization_secret,
-    save_browser_organization_variable, save_browser_repository_secret,
-    save_browser_repository_variable, save_browser_repository_workflow_directory,
-    start_github_installation_from_ui, uninstall_browser_repository,
+    save_browser_organization_variable, save_browser_repository_auto_approval,
+    save_browser_repository_secret, save_browser_repository_variable,
+    save_browser_repository_workflow_directory, start_github_installation_from_ui,
+    uninstall_browser_repository,
 };
 pub(in crate::app) use ui_secrets::{
     browser_secret_inventory, delete_browser_scoped_secret, save_browser_configuration_project,

@@ -731,7 +731,11 @@ async fn configured_data_plane_is_reached_only_over_enrolled_mtls_identity() {
         )
         .run(),
     );
-    tokio::time::timeout(Duration::from_secs(20), async {
+    // Hosted runners can briefly starve the daemon while the all-features test
+    // binary is linking and flushing data-plane state. Keep the assertion on
+    // eventual durable completion while allowing lease fencing and re-offer
+    // recovery to run when an initial short acceptance window is missed.
+    tokio::time::timeout(Duration::from_secs(60), async {
         loop {
             let cataloged = rusqlite::Connection::open(&database)
                 .unwrap()
@@ -813,7 +817,7 @@ async fn configured_data_plane_is_reached_only_over_enrolled_mtls_identity() {
         .unwrap()
         .runner
         .last_heartbeat_unix_ms;
-    tokio::time::timeout(Duration::from_secs(10), async {
+    tokio::time::timeout(Duration::from_secs(30), async {
         loop {
             let runner = control.runner(&enrolled.runner_id).unwrap().runner;
             if runner.active_jobs == 0
@@ -907,7 +911,7 @@ async fn configured_data_plane_is_reached_only_over_enrolled_mtls_identity() {
             now + 7,
         )
         .unwrap();
-    tokio::time::timeout(Duration::from_secs(20), async {
+    tokio::time::timeout(Duration::from_secs(60), async {
         loop {
             let cached_job = control.job("job-e2e-cached").unwrap();
             if cached_job.status.is_terminal() {

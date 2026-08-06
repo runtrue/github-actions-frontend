@@ -984,6 +984,14 @@ pub(in crate::app) async fn browser_repository_settings(
     let workflow_directory_inherited = workflow_directory_override.is_none();
     let workflow_directory =
         workflow_directory_override.unwrap_or_else(|| state.scm_workflow_directory.clone());
+    let auto_approve_writers = match state
+        .store
+        .repository_auto_approve_writers(&context.tenant_id, &repository.id)
+        .await
+    {
+        Ok(enabled) => enabled,
+        Err(error) => return control_plane_problem(&request_id, error),
+    };
     let mut response = Json(json!({
         "secrets": secrets,
         "effective_secrets": effective_secrets,
@@ -991,6 +999,7 @@ pub(in crate::app) async fn browser_repository_settings(
         "effective_variables": effective_variables.into_values().collect::<Vec<_>>(),
         "workflow_directory": workflow_directory,
         "workflow_directory_inherited": workflow_directory_inherited,
+        "auto_approve_writers": auto_approve_writers,
     }))
     .into_response();
     response
@@ -998,6 +1007,87 @@ pub(in crate::app) async fn browser_repository_settings(
         .insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
     protect_sensitive_response(&mut response);
     response
+}
+
+pub(in crate::app) async fn save_browser_repository_auto_approval(
+    State(state): State<AppState>,
+    Extension(request_id): Extension<RequestId>,
+    headers: HeaderMap,
+    Path(repository_id): Path<String>,
+    body: Result<Bytes, BytesRejection>,
+) -> Response {
+    let body = match body {
+        Ok(body) => body,
+        Err(_) => return invalid_object_problem(&request_id, "the form body is invalid"),
+    };
+    let presented_csrf = match browser_csrf_input(&request_id, &headers, Ok(body.clone())) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let enabled = match form_value(&body, "enabled") {
+        Ok(Some(value)) if value == "true" => true,
+        Ok(Some(value)) if value == "false" => false,
+        _ => return invalid_object_problem(&request_id, "auto-approval state is required"),
+    };
+    let now = match now_unix_ms(&request_id) {
+        Ok(now) => now,
+        Err(response) => return response,
+    };
+    let (context, _, _) = match authenticated_browser_session(
+        &state,
+        &request_id,
+        &headers,
+        SCM_WRITE_SCOPE,
+        Some(&presented_csrf),
+        now,
+    )
+    .await
+    {
+        Ok(session) => session,
+        Err(response) => return *response,
+    };
+    let repository = match browser_repository(&state, &request_id, &context, &repository_id).await {
+        Ok(repository) => repository,
+        Err(response) => return response.into_response(),
+    };
+    for (action, privileged, untrusted) in [
+        (CedarAction::EditWorkflowSettings, false, false),
+        (CedarAction::ApproveWorkflow, false, true),
+        (CedarAction::ApprovePrivilegedRun, true, false),
+    ] {
+        if let Err(response) = authorize_browser_resource(
+            &state,
+            &request_id,
+            &context,
+            action,
+            CedarResource {
+                kind: CedarResourceKind::Repository,
+                id: repository.id.clone(),
+                tenant_id: context.tenant_id.clone(),
+                repository_id: Some(repository.id.clone()),
+                author_id: None,
+                risk_score: 0,
+                privileged,
+                untrusted,
+            },
+        )
+        .await
+        {
+            return *response;
+        }
+    }
+    match state
+        .store
+        .set_repository_auto_approve_writers(&context.tenant_id, &repository.id, enabled, now)
+        .await
+    {
+        Ok(enabled) => Json(json!({
+            "repository_id": repository.id,
+            "auto_approve_writers": enabled,
+        }))
+        .into_response(),
+        Err(error) => control_plane_problem(&request_id, error),
+    }
 }
 
 pub(in crate::app) async fn save_browser_repository_workflow_directory(

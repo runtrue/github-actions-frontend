@@ -436,6 +436,16 @@ pub struct GitHubWorkflowApprovalRequest<'a> {
     pub expected_head_commit: &'a str,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct GitHubRepositoryWriterRequest<'a> {
+    pub installation: &'a ScmInstallationRecord,
+    pub repository: &'a ScmRepositoryLinkRecord,
+    pub owner: &'a str,
+    pub name: &'a str,
+    pub actor_external_id: &'a str,
+    pub actor_login: &'a str,
+}
+
 pub trait GitHubInstallationTokenProvider: Send + Sync {
     fn mint_repository_read_token(
         &self,
@@ -470,6 +480,13 @@ pub trait GitHubInstallationTokenProvider: Send + Sync {
     fn actor_can_approve_workflow(
         &self,
         _request: GitHubWorkflowApprovalRequest<'_>,
+    ) -> Result<bool, ScmSourceFetchError> {
+        Err(ScmSourceFetchError::CredentialUnavailable)
+    }
+
+    fn actor_can_write_repository(
+        &self,
+        _request: GitHubRepositoryWriterRequest<'_>,
     ) -> Result<bool, ScmSourceFetchError> {
         Err(ScmSourceFetchError::CredentialUnavailable)
     }
@@ -765,6 +782,66 @@ where
                 _ => ScmSourceFetchError::Rejected,
             })?;
         Ok(permission.can_approve_workflow() && head.eq_ignore_ascii_case(expected_head_commit))
+    }
+
+    fn actor_can_write_repository(
+        &self,
+        request: GitHubRepositoryWriterRequest<'_>,
+    ) -> Result<bool, ScmSourceFetchError> {
+        let GitHubRepositoryWriterRequest {
+            installation,
+            repository,
+            owner,
+            name,
+            actor_external_id,
+            actor_login,
+        } = request;
+        if installation.provider != "github"
+            || installation.status != "active"
+            || repository.status != "active"
+            || installation.tenant_id != repository.tenant_id
+            || installation.id != repository.installation_id
+            || installation.credential_reference != self.credential_reference
+            || !exact_github_repository_origin(&self.endpoints, repository, owner, name)
+        {
+            return Err(ScmSourceFetchError::CredentialUnavailable);
+        }
+        let installation_id = parse_github_external_id(&installation.external_id)?;
+        let repository_id = parse_github_external_id(&repository.external_repository_id)?;
+        let actor_id = parse_github_external_id(actor_external_id)?;
+        let now_unix_seconds =
+            unix_ms().map_err(|_| ScmSourceFetchError::CredentialUnavailable)? / 1_000;
+        let mut broker = self
+            .broker
+            .lock()
+            .map_err(|_| ScmSourceFetchError::CredentialUnavailable)?;
+        let token = broker
+            .mint_installation_token(
+                InstallationTokenRequest {
+                    installation_id,
+                    repository_ids: vec![repository_id],
+                    permissions: std::collections::BTreeMap::from([(
+                        GitHubPermission::Metadata,
+                        GitHubPermissionLevel::Read,
+                    )]),
+                },
+                now_unix_seconds,
+            )
+            .map_err(classify_repository_credential_error)?;
+        broker
+            .repository_permission_for_user(
+                &token,
+                repository_id,
+                owner,
+                name,
+                actor_id,
+                actor_login,
+            )
+            .map(|permission| permission.can_approve_workflow())
+            .map_err(|error| match error {
+                GitHubError::Transport => ScmSourceFetchError::Unavailable,
+                _ => ScmSourceFetchError::Rejected,
+            })
     }
 }
 
@@ -3047,8 +3124,8 @@ impl ScmTaskWorker {
             &event,
             &execution_revision,
             &repository,
-            installation,
-            repository_link,
+            installation.clone(),
+            repository_link.clone(),
         )?;
         let workflow_path = if let Some(path) = requested_workflow_path {
             path
@@ -3368,6 +3445,57 @@ impl ScmTaskWorker {
             None
         };
         let idempotency_key = identity.id("scm", b"idempotency", workflow_suffix);
+        let has_approval_gates = executions
+            .iter()
+            .any(|execution| !execution.approvals.is_empty());
+        let auto_approve_writers = has_approval_gates
+            && self
+                .store_executor
+                .execute(
+                    self.control_plane
+                        .repository_auto_approve_writers(&repository.tenant_id, &repository.id),
+                )
+                .map_err(TaskFailure::control)?;
+        let writer_authorized = if auto_approve_writers && !event.actor.is_bot {
+            let authorizer = self.approval_authorizer.as_ref().ok_or_else(|| {
+                TaskFailure::retryable("GitHub actor permission lookup is unavailable")
+            })?;
+            match authorizer.actor_can_write_repository(GitHubRepositoryWriterRequest {
+                installation: installation.as_ref().ok_or_else(|| {
+                    TaskFailure::retryable("GitHub actor permission lookup is unavailable")
+                })?,
+                repository: repository_link.as_ref().ok_or_else(|| {
+                    TaskFailure::retryable("GitHub actor permission lookup is unavailable")
+                })?,
+                owner: &repository.owner,
+                name: &repository.name,
+                actor_external_id: &event.actor.external_id,
+                actor_login: &event.actor.login,
+            }) {
+                Ok(authorized) => authorized,
+                Err(ScmSourceFetchError::Unavailable) => {
+                    return Err(TaskFailure::retryable(
+                        "GitHub actor permission lookup is unavailable",
+                    )
+                    .into())
+                }
+                Err(
+                    ScmSourceFetchError::CredentialUnavailable
+                    | ScmSourceFetchError::BindingMismatch
+                    | ScmSourceFetchError::Rejected,
+                ) => false,
+            }
+        } else {
+            false
+        };
+        let auto_approvals = if writer_authorized {
+            executions
+                .iter()
+                .flat_map(|execution| execution.approvals.iter().cloned())
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
         let finish_now = finish_clock()?;
         let result = self
             .store_executor
@@ -3384,6 +3512,30 @@ impl ScmTaskWorker {
                     ),
             )
             .map_err(TaskFailure::control)?;
+        for approval in auto_approvals {
+            self.store_executor
+                .execute(self.control_plane.decide_approval_idempotent(
+                    &identity.id(
+                        "writer-auto-approval",
+                        b"writer-auto-approval",
+                        approval.id.as_bytes(),
+                    ),
+                    &approval.id,
+                    ApprovalDecision {
+                        actor_id: format!("github:{}", event.actor.external_id),
+                        decision: ApprovalDecisionKind::Approve,
+                        reason: format!(
+                            "Repository auto-approval after live GitHub write verification for @{}",
+                            event.actor.login
+                        ),
+                        rule_id: approval.rule.id.clone(),
+                        subject_digest: approval.subject_digest.clone(),
+                        decided_unix_ms: finish_now,
+                    },
+                    finish_now,
+                ))
+                .map_err(TaskFailure::control)?;
+        }
         if prepared_source.fetch_id.is_some() {
             self.metrics
                 .source_snapshots_committed

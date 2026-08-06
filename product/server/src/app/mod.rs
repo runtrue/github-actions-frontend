@@ -130,10 +130,11 @@ use github::{
     github_webhook, import_github_installation_from_ui, link_github_repository_from_ui,
     reconcile_claimed_github_lifecycle, revoke_github_installation,
     save_browser_configuration_project, save_browser_organization_secret,
-    save_browser_organization_variable, save_browser_repository_secret,
-    save_browser_repository_variable, save_browser_repository_workflow_directory,
-    save_browser_scoped_secret, start_github_installation_from_ui, sync_github_installation,
-    uninstall_browser_repository, GitHubSetupView,
+    save_browser_organization_variable, save_browser_repository_auto_approval,
+    save_browser_repository_secret, save_browser_repository_variable,
+    save_browser_repository_workflow_directory, save_browser_scoped_secret,
+    start_github_installation_from_ui, sync_github_installation, uninstall_browser_repository,
+    GitHubSetupView,
 };
 use middleware::{
     authentication_problem, request_context, require_bearer, require_writable_control_plane,

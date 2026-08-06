@@ -29,9 +29,9 @@ RUN --mount=type=cache,id=runtrue-gha-cargo-registry-v1,target=/usr/local/cargo/
     CARGO_NET_GIT_FETCH_WITH_CLI=true \
       cargo build --locked --release -p runtrue-server \
         --bin runtrue-server --bin runtrue-action-builder \
-        --bin runtrue-action-admitter; \
-    install -D -m 0555 target/release/runtrue-server /out/runtrue-server; \
-    install -D -m 0555 target/release/runtrue-action-builder /out/runtrue-action-builder; \
+        --bin runtrue-action-admitter && \
+    install -D -m 0555 target/release/runtrue-server /out/runtrue-server && \
+    install -D -m 0555 target/release/runtrue-action-builder /out/runtrue-action-builder && \
     install -D -m 0555 target/release/runtrue-action-admitter /out/runtrue-action-admitter
 
 FROM ${RUST_IMAGE} AS scm-tools

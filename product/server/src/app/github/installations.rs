@@ -424,11 +424,31 @@ pub(in crate::app) async fn inspect_github_installation(
             "GitHub App permissions are incomplete",
             "the installation does not grant the permissions required for Runtrue CI",
         )),
-        _ => {
+        Ok(Err(error)) => {
             github
                 .metrics
                 .provider_failures
                 .fetch_add(1, Ordering::Relaxed);
+            eprintln!(
+                "runtrue-server: GitHub installation inspection failed: request_id={} installation_id={} error={error}",
+                request_id.0, installation_id,
+            );
+            Err(problem_response(
+                request_id,
+                StatusCode::BAD_GATEWAY,
+                "GitHub provider unavailable",
+                "the installation could not be verified through the bounded GitHub provider adapter",
+            ))
+        }
+        Err(error) => {
+            github
+                .metrics
+                .provider_failures
+                .fetch_add(1, Ordering::Relaxed);
+            eprintln!(
+                "runtrue-server: GitHub installation inspection task failed: request_id={} installation_id={} error={error}",
+                request_id.0, installation_id,
+            );
             Err(problem_response(
                 request_id,
                 StatusCode::BAD_GATEWAY,
