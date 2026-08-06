@@ -105,7 +105,8 @@ services:
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
-    network_mode: none
+    networks:
+      - scm-egress
     read_only: true
     init: true
     pids_limit: 512

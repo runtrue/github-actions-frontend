@@ -211,6 +211,36 @@ install_repository_action_signing_key() {
   RUNTRUE_REPOSITORY_ACTION_KEY_CREATED=true
 }
 
+install_repository_action_registry_credentials() {
+  [[ -n "$RUNTRUE_DOCKERHUB_USERNAME" ]] || return 0
+  local destination="${RUNTRUE_STATE_DIR}/repository-actions/builder/docker-config/config.json"
+  local temporary
+  install -d -m 0700 -o "$RUNTRUE_RUNTIME_UID" -g "$RUNTRUE_RUNTIME_GID" \
+    "${RUNTRUE_STATE_DIR}/repository-actions/builder/docker-config"
+  temporary=$(mktemp -- "${RUNTRUE_STATE_DIR}/repository-actions/builder/.docker-config.XXXXXXXX")
+  python3 - "$RUNTRUE_DOCKERHUB_USERNAME" "$RUNTRUE_DOCKERHUB_TOKEN_SOURCE" "$temporary" <<'PY'
+import base64
+import json
+import pathlib
+import sys
+
+username, token_path, destination = sys.argv[1:]
+token = pathlib.Path(token_path).read_text(encoding="utf-8").rstrip("\r\n")
+if not token or "\n" in token or "\r" in token:
+    raise SystemExit("Docker Hub token must contain exactly one nonempty line")
+auth = base64.b64encode(f"{username}:{token}".encode()).decode()
+pathlib.Path(destination).write_text(json.dumps({
+    "auths": {"https://index.docker.io/v1/": {"auth": auth}}
+}, indent=2) + "\n", encoding="utf-8")
+PY
+  install_private_file \
+    "$temporary" \
+    "$destination" \
+    "$RUNTRUE_RUNTIME_UID" \
+    "$RUNTRUE_RUNTIME_GID"
+  rm -f -- "$temporary"
+}
+
 recycle_autoscaled_runners_for_repository_action_trust() {
   local force=${1:-false}
   "$RUNTRUE_REPOSITORY_ACTION_KEY_CREATED" || "$force" || return 0
@@ -492,6 +522,8 @@ RUNTRUE_ACTION_ADMISSION_CONTAINER=${RUNTRUE_ACTION_ADMISSION_CONTAINER:-${RUNTR
 RUNTRUE_REPOSITORY_ACTION_IMAGE_REPOSITORY=${RUNTRUE_REPOSITORY_ACTION_IMAGE_REPOSITORY:-runtrue.local/repository-actions}
 RUNTRUE_REPOSITORY_ACTION_BUILDX_BUILDER=${RUNTRUE_REPOSITORY_ACTION_BUILDX_BUILDER:-${RUNTRUE_COMPOSE_PROJECT_NAME}-repository-actions}
 RUNTRUE_REPOSITORY_ACTION_ALLOWED_BASE_IMAGES=${RUNTRUE_REPOSITORY_ACTION_ALLOWED_BASE_IMAGES:-node:22-bookworm-slim@sha256:53ada149d435c38b14476cb57e4a7da73c15595aba79bd6971b547ceb6d018bf}
+RUNTRUE_DOCKERHUB_USERNAME=${RUNTRUE_DOCKERHUB_USERNAME:-}
+RUNTRUE_DOCKERHUB_TOKEN_SOURCE=${RUNTRUE_DOCKERHUB_TOKEN_SOURCE:-}
 RUNTRUE_REPOSITORY_ACTION_KEY_CREATED=false
 RUNTRUE_AUTOSCALER_CLAIM_ROOT=${RUNTRUE_AUTOSCALER_CLAIM_ROOT:-/var/lib/runtrue-autoscaler/${RUNTRUE_COMPOSE_PROJECT_NAME}/claims}
 RUNTRUE_EDGE_UPSTREAM_NAME=${RUNTRUE_EDGE_UPSTREAM_NAME:-${RUNTRUE_COMPOSE_PROJECT_NAME//_/-}-frontend}
@@ -526,6 +558,7 @@ readonly RUNTRUE_COMPOSE_PROJECT_NAME
 readonly RUNTRUE_ACTION_ADMISSION_CONTAINER
 readonly RUNTRUE_REPOSITORY_ACTION_IMAGE_REPOSITORY RUNTRUE_REPOSITORY_ACTION_BUILDX_BUILDER
 readonly RUNTRUE_REPOSITORY_ACTION_ALLOWED_BASE_IMAGES
+readonly RUNTRUE_DOCKERHUB_USERNAME RUNTRUE_DOCKERHUB_TOKEN_SOURCE
 readonly RUNTRUE_TRAEFIK_MODE RUNTRUE_COMPOSE_PROFILES
 readonly RUNTRUE_EDGE_NETWORK_NAME RUNTRUE_EDGE_NETWORK_EXTERNAL RUNTRUE_EDGE_UPSTREAM_NAME
 readonly RUNTRUE_TRAEFIK_DOCKER_ENABLED RUNTRUE_PUBLIC_HOST RUNTRUE_TRAEFIK_ROUTER_NAME
@@ -589,6 +622,13 @@ fi
 [[ "$RUNTRUE_REPOSITORY_ACTION_ALLOWED_BASE_IMAGES" == *@sha256:* &&
    "$RUNTRUE_REPOSITORY_ACTION_ALLOWED_BASE_IMAGES" != *[$' \t\r\n']* ]] ||
   die 'RUNTRUE_REPOSITORY_ACTION_ALLOWED_BASE_IMAGES must contain immutable comma-separated image references'
+if [[ -n "$RUNTRUE_DOCKERHUB_USERNAME" || -n "$RUNTRUE_DOCKERHUB_TOKEN_SOURCE" ]]; then
+  [[ "$RUNTRUE_DOCKERHUB_USERNAME" =~ ^[A-Za-z0-9_.-]+$ ]] ||
+    die 'RUNTRUE_DOCKERHUB_USERNAME is invalid'
+  [[ "$RUNTRUE_DOCKERHUB_TOKEN_SOURCE" == /* ]] ||
+    die 'RUNTRUE_DOCKERHUB_TOKEN_SOURCE must be an absolute path'
+  require_private_file "$RUNTRUE_DOCKERHUB_TOKEN_SOURCE" 'Docker Hub access token'
+fi
 [[ "$RUNTRUE_EDGE_NETWORK_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] ||
   die 'the edge network name is invalid'
 [[ ${#RUNTRUE_EDGE_UPSTREAM_NAME} -le 63 && "$RUNTRUE_EDGE_UPSTREAM_NAME" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]] ||
@@ -666,6 +706,7 @@ install_runtime_bundle \
   "$RUNTRUE_RUNNER_RUNTIME_BUNDLE_IMAGE" \
   "${RUNTRUE_STATE_DIR}/autoscaler/runtime-assets"
 install_repository_action_signing_key
+install_repository_action_registry_credentials
 env RUNTRUE_RUNTIME_UID="$RUNTRUE_RUNTIME_UID" RUNTRUE_RUNTIME_GID="$RUNTRUE_RUNTIME_GID" \
   "${bootstrap[@]}" --check-only >/dev/null
 
