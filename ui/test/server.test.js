@@ -220,7 +220,12 @@ test("repository events keep source metadata grouped and columns aligned", async
   ]);
 
   assert.match(html, /<col class="repository-source-column">/);
+  assert.match(html, /Verified webhook deliveries and their processing outcomes\./);
   assert.match(script, /class="repository-event-source"/);
+  assert.match(script, /case "completed":\s*return \{ status: "no_run", label: "No run", detail: "Handled without creating a run" \}/);
+  assert.match(script, /case "processing":\s*return \{ status: "processing", label: "Processing", detail: "Handler in progress" \}/);
+  assert.match(script, /default:\s*return \{ status: "received", label: "Received", detail: "No handler scheduled" \}/);
+  assert.doesNotMatch(script, /No run created yet/);
   assert.match(styles, /\.repository-event-source \{[^}]*display: grid;[^}]*gap: var\(--space-1\);/);
   assert.match(styles, /\.repository-event-table th:last-child,[^}]*text-align: right;/s);
   assert.doesNotMatch(styles, /var\(--space-7\)/);

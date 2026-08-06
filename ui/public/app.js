@@ -142,9 +142,27 @@
     return action && !kind.endsWith(`.${action}`) ? `${kind}.${action}` : kind;
   }
 
-  function repositoryEventStatus(event, run) {
-    if (run) return String(run.status || "pending");
-    return event.processingStatus === "failed" ? "failed" : "pending";
+  function repositoryEventPresentation(event, run) {
+    if (run) {
+      const status = String(run.status || "pending");
+      return {
+        status,
+        label: titleCase(status),
+        detail: `Run ${compactId(run.id)}`,
+      };
+    }
+    switch (String(event.processingStatus || "received").toLowerCase()) {
+      case "pending":
+        return { status: "pending", label: "Pending", detail: "Waiting for handler" };
+      case "processing":
+        return { status: "processing", label: "Processing", detail: "Handler in progress" };
+      case "completed":
+        return { status: "no_run", label: "No run", detail: "Handled without creating a run" };
+      case "failed":
+        return { status: "failed", label: "Failed", detail: "Handler failed before creating a run" };
+      default:
+        return { status: "received", label: "Received", detail: "No handler scheduled" };
+    }
   }
 
   function latestRepositoryActivity(runs, events) {
@@ -164,7 +182,7 @@
     const normalized = String(value || "").toLowerCase();
     if (["ready", "active", "online", "succeeded", "approved", "consumed", "good", "success"].includes(normalized)) return "success";
     if (["failed", "canceled", "timed_out", "lost", "rejected", "error"].includes(normalized)) return "danger";
-    if (["running", "queued", "offered"].includes(normalized)) return "running";
+    if (["running", "queued", "offered", "processing"].includes(normalized)) return "running";
     if (["pending", "degraded", "missing", "warning", "awaiting event", "needs selection", "draining"].includes(normalized)) return "warning";
     return "neutral";
   }
@@ -676,10 +694,10 @@
     byId("repository-event-count").textContent = `${events.length} ${events.length === 1 ? "event" : "events"}`;
     byId("repository-events-body").innerHTML = events.map((event) => {
       const run = runForEvent(event, runs);
-      const status = repositoryEventStatus(event, run);
+      const outcome = repositoryEventPresentation(event, run);
       const ref = event.refName ? shortRef(event.refName) : "Repository webhook";
       const handler = titleCase(event.processingStatus || "received");
-      return `<tr><td><strong class="table-primary mono">${escapeHtml(eventTypeLabel(event))}</strong><small>Delivery <span class="mono" title="${escapeHtml(event.deliveryId)}">${escapeHtml(compactId(event.deliveryId, 12))}</span></small></td><td><div class="repository-event-source"><strong class="table-primary">@${escapeHtml(event.actorLogin || "unknown")}</strong><small>${escapeHtml(ref)} · Handler ${escapeHtml(handler)}</small></div></td><td><span class="state-badge ${tone(status)}">${escapeHtml(titleCase(status))}</span><small>${run ? `Run ${escapeHtml(compactId(run.id))}` : "No run created yet"}</small></td><td class="date-cell"><time datetime="${escapeHtml(event.receivedAt)}">${escapeHtml(formatDate(event.receivedAt))}</time></td></tr>`;
+      return `<tr><td><strong class="table-primary mono">${escapeHtml(eventTypeLabel(event))}</strong><small>Delivery <span class="mono" title="${escapeHtml(event.deliveryId)}">${escapeHtml(compactId(event.deliveryId, 12))}</span></small></td><td><div class="repository-event-source"><strong class="table-primary">@${escapeHtml(event.actorLogin || "unknown")}</strong><small>${escapeHtml(ref)} · Handler ${escapeHtml(handler)}</small></div></td><td><span class="state-badge ${tone(outcome.status)}">${escapeHtml(outcome.label)}</span><small>${escapeHtml(outcome.detail)}</small></td><td class="date-cell"><time datetime="${escapeHtml(event.receivedAt)}">${escapeHtml(formatDate(event.receivedAt))}</time></td></tr>`;
     }).join("");
     byId("repository-events-empty").hidden = events.length > 0;
     byId("repository-events-body").closest("table").hidden = events.length === 0;
