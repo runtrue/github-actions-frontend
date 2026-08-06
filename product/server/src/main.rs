@@ -15,10 +15,11 @@ use runtrue_scm::{
 use runtrue_server::read_database_url_file;
 use runtrue_server::{
     postgres_server_runtime_ready, router, AppState, GitHubAppInstallationTokenProvider,
-    GitHubInstallationTokenProvider, GitHubOauthQuickstartConfig, HardenedGitHubOauthClient,
-    HardenedHumanOidcClient, HumanOidcLimits, RunnerCertificateAuthority, RunnerControlConfig,
-    RunnerControlService, RunnerEnrollmentService, ScmTaskWorker, ScmWorkerConfig,
-    DEFAULT_RUNNER_CERTIFICATE_LIFETIME, DEFAULT_SCM_WORKFLOW_DIRECTORY,
+    GitHubInstallationTokenProvider, GitHubMirrorSourceFetcher, GitHubOauthQuickstartConfig,
+    HardenedGitHubOauthClient, HardenedHumanOidcClient, HumanOidcLimits,
+    RunnerCertificateAuthority, RunnerControlConfig, RunnerControlService, RunnerEnrollmentService,
+    ScmSourceFetcher, ScmTaskWorker, ScmWorkerConfig, DEFAULT_RUNNER_CERTIFICATE_LIFETIME,
+    DEFAULT_SCM_WORKFLOW_DIRECTORY,
 };
 #[cfg(feature = "github-actions")]
 use runtrue_server::{RepositoryActionBuilder, UnixRepositoryActionBuilder};
@@ -1102,6 +1103,7 @@ async fn run() -> Result<(), Box<dyn Error + Send + Sync>> {
             );
             worker_config.workflow_directory = scm_workflow_directory.clone();
             if let Ok(image) = env::var("RUNTRUE_GHA_DEFAULT_JOB_CONTAINER_IMAGE") {
+                state = state.with_scm_default_job_container_image(image.clone())?;
                 worker_config.default_job_container_image = Some(image);
             }
             if let Some(github) = config.github_app.as_ref() {
@@ -1121,6 +1123,15 @@ async fn run() -> Result<(), Box<dyn Error + Send + Sync>> {
                     github.credential_reference.clone(),
                     github.endpoints.clone(),
                 )?);
+                let source_tokens: Arc<dyn GitHubInstallationTokenProvider> = tokens.clone();
+                let source_fetcher: Arc<dyn ScmSourceFetcher> =
+                    Arc::new(GitHubMirrorSourceFetcher::open(
+                        &worker_config.mirror_root,
+                        source_tokens,
+                        worker_config.mirror_limits,
+                        worker_config.github_provider_endpoints.clone(),
+                    )?);
+                state = state.with_scm_source_fetcher(source_fetcher);
                 #[cfg(feature = "github-actions")]
                 {
                     let action_builder = match (

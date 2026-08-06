@@ -1068,6 +1068,59 @@ pub trait ScmSourceFetcher: Send + Sync {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScmWorkflowInventorySource {
+    pub path: String,
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScmWorkflowInventory {
+    pub branch: String,
+    pub commit: String,
+    pub workflows: Vec<ScmWorkflowInventorySource>,
+}
+
+pub fn load_scm_workflow_inventory(
+    fetcher: &dyn ScmSourceFetcher,
+    mut request: ScmSourceFetchRequest,
+    default_branch: &str,
+    workflow_directory: &str,
+) -> Result<ScmWorkflowInventory, ScmSourceFetchError> {
+    let commit = fetcher.resolve_default_branch_head(&request, default_branch)?;
+    request.source_commit.clone_from(&commit);
+    request.base_commit = None;
+    let fetched = fetcher.fetch(&request)?;
+    let paths = fetched
+        .repository
+        .regular_files_under(&commit, workflow_directory, MAX_SCM_WORKFLOWS)
+        .map_err(|_| ScmSourceFetchError::Rejected)?
+        .into_iter()
+        .filter(|path| workflow_path_allowed(workflow_directory, path))
+        .collect::<BTreeSet<_>>();
+    if paths.len() > MAX_SCM_WORKFLOWS {
+        return Err(ScmSourceFetchError::Rejected);
+    }
+    let workflows = paths
+        .into_iter()
+        .map(|path| {
+            fetched
+                .repository
+                .read_blob(&commit, &path)
+                .map(|blob| ScmWorkflowInventorySource {
+                    path,
+                    bytes: blob.bytes,
+                })
+                .map_err(|_| ScmSourceFetchError::Rejected)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(ScmWorkflowInventory {
+        branch: default_branch.to_owned(),
+        commit,
+        workflows,
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PreparedRepositoryAction {
     pub reference: String,
     pub action: ResolvedSourceAction,
@@ -2012,12 +2065,15 @@ impl AppState {
         tokens: Arc<dyn GitHubInstallationTokenProvider>,
     ) -> Result<ScmTaskWorker, ScmWorkerBuildError> {
         let approval_authorizer = Arc::clone(&tokens);
-        let fetcher = Arc::new(GitHubMirrorSourceFetcher::open(
-            &config.mirror_root,
-            tokens,
-            config.mirror_limits,
-            config.github_provider_endpoints.clone(),
-        )?);
+        let fetcher = match &self.scm_source_fetcher {
+            Some(fetcher) => Arc::clone(fetcher),
+            None => Arc::new(GitHubMirrorSourceFetcher::open(
+                &config.mirror_root,
+                tokens,
+                config.mirror_limits,
+                config.github_provider_endpoints.clone(),
+            )?),
+        };
         let mut worker = self.scm_task_worker_with_source_fetcher(config, fetcher)?;
         worker.approval_authorizer = Some(approval_authorizer);
         Ok(worker)
@@ -2034,12 +2090,15 @@ impl AppState {
         let tokens: Arc<dyn GitHubInstallationTokenProvider> = provider.clone();
         let approval_authorizer = Arc::clone(&tokens);
         let publisher: Arc<dyn GitHubCheckPublisher> = provider;
-        let fetcher = Arc::new(GitHubMirrorSourceFetcher::open(
-            &config.mirror_root,
-            tokens,
-            config.mirror_limits,
-            config.github_provider_endpoints.clone(),
-        )?);
+        let fetcher = match &self.scm_source_fetcher {
+            Some(fetcher) => Arc::clone(fetcher),
+            None => Arc::new(GitHubMirrorSourceFetcher::open(
+                &config.mirror_root,
+                tokens,
+                config.mirror_limits,
+                config.github_provider_endpoints.clone(),
+            )?),
+        };
         let mut worker = self.scm_task_worker_with_source_fetcher(config, fetcher)?;
         worker.check_publisher = Some(publisher);
         worker.approval_authorizer = Some(approval_authorizer);
@@ -2060,12 +2119,15 @@ impl AppState {
         let tokens: Arc<dyn GitHubInstallationTokenProvider> = provider.clone();
         let approval_authorizer = Arc::clone(&tokens);
         let publisher: Arc<dyn GitHubCheckPublisher> = provider;
-        let fetcher: Arc<dyn ScmSourceFetcher> = Arc::new(GitHubMirrorSourceFetcher::open(
-            &config.mirror_root,
-            tokens,
-            config.mirror_limits,
-            config.github_provider_endpoints.clone(),
-        )?);
+        let fetcher: Arc<dyn ScmSourceFetcher> = match &self.scm_source_fetcher {
+            Some(fetcher) => Arc::clone(fetcher),
+            None => Arc::new(GitHubMirrorSourceFetcher::open(
+                &config.mirror_root,
+                tokens,
+                config.mirror_limits,
+                config.github_provider_endpoints.clone(),
+            )?),
+        };
         let resolver: Arc<dyn RepositoryActionResolver> =
             Arc::new(GitHubRepositoryActionResolver::try_new(
                 Arc::clone(&self.store),
@@ -5351,6 +5413,34 @@ mod tests {
     };
     use std::process::Command;
 
+    #[derive(Debug)]
+    struct InventorySourceFetcher {
+        repository: PathBuf,
+        commit: String,
+    }
+
+    impl ScmSourceFetcher for InventorySourceFetcher {
+        fn resolve_default_branch_head(
+            &self,
+            _request: &ScmSourceFetchRequest,
+            _default_branch: &str,
+        ) -> Result<String, ScmSourceFetchError> {
+            Ok(self.commit.clone())
+        }
+
+        fn fetch(
+            &self,
+            _request: &ScmSourceFetchRequest,
+        ) -> Result<FetchedScmRepository, ScmSourceFetchError> {
+            Ok(FetchedScmRepository {
+                repository: GitRepository::open(&self.repository, GitLimits::default())
+                    .map_err(|_| ScmSourceFetchError::Unavailable)?,
+                token_scope_digest: ContentDigest::sha256(b"inventory token scope"),
+                mirror_identity_digest: ContentDigest::sha256(b"inventory mirror"),
+            })
+        }
+    }
+
     #[cfg(feature = "postgres")]
     #[test]
     fn postgres_persistence_errors_are_retryable() {
@@ -5481,6 +5571,76 @@ mod tests {
             discover_workflow_paths(&repository, &commit, &config.workflow_directory).unwrap(),
             vec![format!("{DEFAULT_SCM_WORKFLOW_DIRECTORY}/ci.yaml")]
         );
+    }
+
+    #[test]
+    fn workflow_inventory_reads_supported_files_from_exact_default_branch_head() {
+        let directory = tempfile::tempdir().unwrap();
+        private_directory(directory.path());
+        let repository_path = directory.path().join("repository");
+        private_directory(&repository_path);
+        git(&repository_path, &["init", "--quiet"]);
+        git(
+            &repository_path,
+            &["config", "user.email", "worker@runtrue.invalid"],
+        );
+        git(&repository_path, &["config", "user.name", "Worker Test"]);
+        let workflow_directory = repository_path.join(".runtrue/workflows");
+        fs::create_dir_all(&workflow_directory).unwrap();
+        fs::write(
+            workflow_directory.join("ci.yaml"),
+            "version: 1\nname: CI\njobs: {}\n",
+        )
+        .unwrap();
+        fs::write(workflow_directory.join("notes.txt"), "not a workflow\n").unwrap();
+        git(&repository_path, &["add", ".runtrue/workflows"]);
+        git(&repository_path, &["commit", "--quiet", "-m", "workflow"]);
+        let commit = git(&repository_path, &["rev-parse", "HEAD"]);
+        let fetcher = InventorySourceFetcher {
+            repository: repository_path,
+            commit: commit.clone(),
+        };
+        let inventory = load_scm_workflow_inventory(
+            &fetcher,
+            ScmSourceFetchRequest {
+                installation: ScmInstallationRecord {
+                    id: "installation-1".to_owned(),
+                    tenant_id: "tenant-1".to_owned(),
+                    provider: "github".to_owned(),
+                    external_id: "1".to_owned(),
+                    credential_reference: "credential-1".to_owned(),
+                    permissions: serde_json::json!({"contents": "read"}),
+                    status: "active".to_owned(),
+                    created_unix_ms: 1,
+                    updated_unix_ms: 1,
+                },
+                repository: ScmRepositoryLinkRecord {
+                    repository_id: "repository-1".to_owned(),
+                    tenant_id: "tenant-1".to_owned(),
+                    installation_id: "installation-1".to_owned(),
+                    external_repository_id: "42".to_owned(),
+                    clone_url: "https://github.example/octo/runtrue.git".to_owned(),
+                    status: "active".to_owned(),
+                    created_unix_ms: 1,
+                    updated_unix_ms: 1,
+                },
+                tenant_id: "tenant-1".to_owned(),
+                repository_id: "repository-1".to_owned(),
+                owner: "octo".to_owned(),
+                name: "runtrue".to_owned(),
+                source_commit: String::new(),
+                base_commit: None,
+            },
+            "main",
+            ".runtrue/workflows",
+        )
+        .unwrap();
+
+        assert_eq!(inventory.branch, "main");
+        assert_eq!(inventory.commit, commit);
+        assert_eq!(inventory.workflows.len(), 1);
+        assert_eq!(inventory.workflows[0].path, ".runtrue/workflows/ci.yaml");
+        assert!(String::from_utf8_lossy(&inventory.workflows[0].bytes).contains("name: CI"));
     }
 
     #[cfg(feature = "github-actions")]

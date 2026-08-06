@@ -122,8 +122,8 @@ use embedded_ui::{
 };
 use github::{
     browser_decide_workflow_approval, browser_organization_settings, browser_repository_settings,
-    browser_retry_run, browser_run_detail, browser_secret_inventory, create_github_setup,
-    delete_browser_organization_secret, delete_browser_organization_variable,
+    browser_repository_workflows, browser_retry_run, browser_run_detail, browser_secret_inventory,
+    create_github_setup, delete_browser_organization_secret, delete_browser_organization_variable,
     delete_browser_repository_secret, delete_browser_repository_variable,
     delete_browser_scoped_secret, finish_github_installation, github_app_status,
     github_browser_state, github_catalog_organizations, github_catalog_repositories,

@@ -10,7 +10,9 @@ use crate::runner_certificates::RunnerCertificateAuthority;
 use crate::runner_service::{
     RunnerControlConfig, RunnerControlService, RunnerDataPlane, RunnerServiceError,
 };
-use crate::scm_worker::{GitHubInstallationTokenProvider, DEFAULT_SCM_WORKFLOW_DIRECTORY};
+use crate::scm_worker::{
+    GitHubInstallationTokenProvider, ScmSourceFetcher, DEFAULT_SCM_WORKFLOW_DIRECTORY,
+};
 use rand_core::OsRng;
 use runtrue_attest::CapsuleSigningKey;
 use runtrue_auth::{SessionPolicy, TokenHasher};
@@ -341,7 +343,9 @@ pub struct AppState {
     pub(in crate::app) authorization: Arc<CedarAuthorizationEngine>,
     pub(in crate::app) runner_data_plane: Option<Arc<RunnerDataPlane>>,
     pub(in crate::app) scm_credential_provider: Option<Arc<dyn GitHubInstallationTokenProvider>>,
+    pub(crate) scm_source_fetcher: Option<Arc<dyn ScmSourceFetcher>>,
     pub(in crate::app) scm_workflow_directory: String,
+    pub(in crate::app) scm_default_job_container_image: Option<String>,
     pub(in crate::app) human_oidc: Option<Arc<HumanOidcState>>,
     pub(in crate::app) github_installation: Option<Arc<GitHubInstallationState>>,
     pub(in crate::app) github_setup_key: Zeroizing<[u8; 32]>,
@@ -412,7 +416,9 @@ impl AppState {
             authorization: Arc::new(authorization),
             runner_data_plane: None,
             scm_credential_provider: None,
+            scm_source_fetcher: None,
             scm_workflow_directory: DEFAULT_SCM_WORKFLOW_DIRECTORY.to_owned(),
+            scm_default_job_container_image: None,
             human_oidc: None,
             github_installation: None,
             github_setup_key,
@@ -428,6 +434,12 @@ impl AppState {
         self
     }
 
+    #[must_use]
+    pub fn with_scm_source_fetcher(mut self, fetcher: Arc<dyn ScmSourceFetcher>) -> Self {
+        self.scm_source_fetcher = Some(fetcher);
+        self
+    }
+
     pub fn with_scm_workflow_directory(
         mut self,
         workflow_directory: String,
@@ -438,6 +450,20 @@ impl AppState {
             return Err(ServerBuildError::InvalidScmWorkflowDirectory);
         }
         self.scm_workflow_directory = workflow_directory;
+        Ok(self)
+    }
+
+    pub fn with_scm_default_job_container_image(
+        mut self,
+        image: String,
+    ) -> Result<Self, ServerBuildError> {
+        if image.is_empty()
+            || image.len() > 4096
+            || image.bytes().any(|byte| byte.is_ascii_whitespace())
+        {
+            return Err(ServerBuildError::InvalidScmDefaultJobContainerImage);
+        }
+        self.scm_default_job_container_image = Some(image);
         Ok(self)
     }
 
@@ -739,6 +765,8 @@ pub enum ServerBuildError {
     InvalidBootstrapToken,
     #[error("SCM workflow directory must be a normalized repository-relative path")]
     InvalidScmWorkflowDirectory,
+    #[error("SCM default job container image is invalid")]
+    InvalidScmDefaultJobContainerImage,
     #[error("operating system randomness is unavailable")]
     RandomnessUnavailable,
     #[error("invalid SCM webhook configuration: {0}")]

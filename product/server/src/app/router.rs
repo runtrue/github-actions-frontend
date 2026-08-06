@@ -3,13 +3,14 @@ use crate::app::{
     begin_github_oauth_login, begin_human_oidc_login, browser_change_team_member,
     browser_create_team, browser_create_user, browser_decide_workflow_approval, browser_identity,
     browser_organization_settings, browser_policy_page, browser_policy_status,
-    browser_repository_settings, browser_retry_run, browser_run_detail, browser_secret_inventory,
-    browser_session_page, browser_session_status, browser_update_team, browser_update_user,
-    cancel_run, create_api_token, create_artifact_download_ticket, create_capsule,
-    create_enrollment_token, create_fixed_update_claim, create_github_setup, create_policy_version,
-    create_replay_bundle, create_repository, create_run, create_runner_fleet_request,
-    create_runner_launch_claim, create_runner_pool, create_secret, create_team, create_user,
-    decide_approval, delete_browser_organization_secret, delete_browser_organization_variable,
+    browser_repository_settings, browser_repository_workflows, browser_retry_run,
+    browser_run_detail, browser_secret_inventory, browser_session_page, browser_session_status,
+    browser_update_team, browser_update_user, cancel_run, create_api_token,
+    create_artifact_download_ticket, create_capsule, create_enrollment_token,
+    create_fixed_update_claim, create_github_setup, create_policy_version, create_replay_bundle,
+    create_repository, create_run, create_runner_fleet_request, create_runner_launch_claim,
+    create_runner_pool, create_secret, create_team, create_user, decide_approval,
+    delete_browser_organization_secret, delete_browser_organization_variable,
     delete_browser_repository_secret, delete_browser_repository_variable,
     delete_browser_scoped_secret, delete_secret, delete_variable, download_artifact, drain_runner,
     effective_user_repository_access, embedded_app_js, embedded_favicon,
@@ -361,6 +362,10 @@ pub fn router(state: AppState) -> Router {
             .route(
                 "/api/v1/ui/repositories/:repository_id/settings",
                 get(browser_repository_settings),
+            )
+            .route(
+                "/api/v1/ui/repositories/:repository_id/workflows",
+                get(browser_repository_workflows),
             )
             .merge(mutations)
     } else {
