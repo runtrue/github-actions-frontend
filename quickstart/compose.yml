@@ -62,34 +62,32 @@ services:
     user: "${RUNTRUE_RUNTIME_UID:?run quick-start.sh first}:${RUNTRUE_RUNTIME_GID:?run quick-start.sh first}"
     group_add:
       - "${RUNTRUE_DOCKER_GID:?run quick-start.sh first}"
-    entrypoint: ["/usr/local/bin/runtrue-action-builder"]
+    entrypoint: ["/bin/sh", "-eu", "-c"]
     command:
-      - --socket
-      - /var/lib/runtrue-action-builder/builder.sock
-      - --context-root
-      - /var/lib/runtrue-action-builder/source
-      - --state-directory
-      - /var/lib/runtrue-action-builder/builds
-      - --image-repository
-      - "${RUNTRUE_REPOSITORY_ACTION_IMAGE_REPOSITORY:-runtrue.local/repository-actions}"
-      - --docker
-      - /usr/bin/docker
-      - --buildx-builder
-      - default
-      - --build-network
-      - default
-      - --build-policy-id
-      - runtrue.repository-action-build.v3.network-default.pinned-materials
-      - --build-environment-id
-      - runtrue.buildkit.v0.26.2.docker-driver.no-insecure-entitlements
-      - --allowed-base-image
-      - "${RUNTRUE_REPOSITORY_ACTION_ALLOWED_BASE_IMAGES:?run quick-start.sh first}"
-      - --admit-command
-      - /usr/local/bin/runtrue-action-admitter
-      - --socket-gid
-      - "${RUNTRUE_RUNTIME_GID:?run quick-start.sh first}"
+      - |
+        install -d -m 0700 /var/lib/runtrue-action-builder/docker-config
+        if ! /usr/bin/docker buildx inspect "${RUNTRUE_REPOSITORY_ACTION_BUILDX_BUILDER:?run quick-start.sh first}" >/dev/null 2>&1; then
+          /usr/bin/docker buildx create \
+            --name "${RUNTRUE_REPOSITORY_ACTION_BUILDX_BUILDER:?run quick-start.sh first}" \
+            --driver docker-container >/dev/null
+        fi
+        /usr/bin/docker buildx inspect \
+          "${RUNTRUE_REPOSITORY_ACTION_BUILDX_BUILDER:?run quick-start.sh first}" --bootstrap >/dev/null
+        exec /usr/local/bin/runtrue-action-builder \
+          --socket /var/lib/runtrue-action-builder/builder.sock \
+          --context-root /var/lib/runtrue-action-builder/source \
+          --state-directory /var/lib/runtrue-action-builder/builds \
+          --image-repository "${RUNTRUE_REPOSITORY_ACTION_IMAGE_REPOSITORY:-runtrue.local/repository-actions}" \
+          --docker /usr/bin/docker \
+          --buildx-builder "${RUNTRUE_REPOSITORY_ACTION_BUILDX_BUILDER:?run quick-start.sh first}" \
+          --build-network default \
+          --build-policy-id runtrue.repository-action-build.v3.network-default.pinned-materials \
+          --build-environment-id runtrue.buildkit.v0.26.2.docker-container-driver.no-insecure-entitlements \
+          --allowed-base-image "${RUNTRUE_REPOSITORY_ACTION_ALLOWED_BASE_IMAGES:?run quick-start.sh first}" \
+          --admit-command /usr/local/bin/runtrue-action-admitter \
+          --socket-gid "${RUNTRUE_RUNTIME_GID:?run quick-start.sh first}"
     environment:
-      DOCKER_CONFIG: /tmp/docker-config
+      DOCKER_CONFIG: /var/lib/runtrue-action-builder/docker-config
       RUNTRUE_ACTION_ADMISSION_DOCKER: /usr/bin/docker
       RUNTRUE_ACTION_ADMISSION_MANIFEST_DIRECTORY: /var/lib/runtrue-igh-oci/manifests
       RUNTRUE_ACTION_ADMISSION_PODMAN_ROOT: /var/lib/runtrue-igh-oci/image-store
@@ -148,7 +146,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
-      start_period: 5s
+      start_period: 90s
     restart: unless-stopped
 
   github-signer:
