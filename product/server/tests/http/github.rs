@@ -1324,6 +1324,27 @@ async fn github_browser_sets_an_arbitrary_repository_relative_workflow_directory
     let inherited = json_body(inherited).await;
     assert_eq!(inherited["workflow_directory"], ".runtrue/workflows");
     assert_eq!(inherited["workflow_directory_inherited"], true);
+    assert_eq!(inherited["auto_approve_writers"], false);
+
+    let save_auto_approval = application
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/ui/repositories/repo-browser-workflow/auto-approval")
+                .header("cookie", &cookies)
+                .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from(format!("csrf_token={csrf}&enabled=true")))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(save_auto_approval.status(), StatusCode::OK);
+    let saved_policy = json_body(save_auto_approval).await;
+    assert_eq!(saved_policy["auto_approve_writers"], true);
+    assert!(control
+        .repository_auto_approve_writers("tenant-browser", "repo-browser-workflow")
+        .unwrap());
 
     let save = application
         .clone()
@@ -1363,6 +1384,7 @@ async fn github_browser_sets_an_arbitrary_repository_relative_workflow_directory
     let settings = json_body(settings).await;
     assert_eq!(settings["workflow_directory"], "automation/workflows");
     assert_eq!(settings["workflow_directory_inherited"], false);
+    assert_eq!(settings["auto_approve_writers"], true);
 
     let traversal = application
         .oneshot(

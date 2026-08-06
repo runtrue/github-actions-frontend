@@ -32,11 +32,12 @@ use crate::app::{
     require_writable_control_plane, require_writable_human_auth, revoke_api_token,
     revoke_github_installation, revoke_repository_access, rotate_secret, route_not_found,
     save_browser_configuration_project, save_browser_organization_secret,
-    save_browser_organization_variable, save_browser_repository_secret,
-    save_browser_repository_variable, save_browser_repository_workflow_directory,
-    save_browser_scoped_secret, start_github_installation_from_ui, sync_github_installation,
-    transition_runner_fleet_request, uninstall_browser_repository, update_team, update_user,
-    AppState, API_BODY_BYTES, BROWSER_MUTATION_BODY_BYTES, MAX_CREATE_CAPSULE_BODY_BYTES,
+    save_browser_organization_variable, save_browser_repository_auto_approval,
+    save_browser_repository_secret, save_browser_repository_variable,
+    save_browser_repository_workflow_directory, save_browser_scoped_secret,
+    start_github_installation_from_ui, sync_github_installation, transition_runner_fleet_request,
+    uninstall_browser_repository, update_team, update_user, AppState, API_BODY_BYTES,
+    BROWSER_MUTATION_BODY_BYTES, MAX_CREATE_CAPSULE_BODY_BYTES,
 };
 use axum::extract::DefaultBodyLimit;
 use axum::middleware::{self as axum_middleware};
@@ -309,6 +310,10 @@ pub fn router(state: AppState) -> Router {
             .route(
                 "/api/v1/ui/repositories/:repository_id/workflow-directory",
                 post(save_browser_repository_workflow_directory),
+            )
+            .route(
+                "/api/v1/ui/repositories/:repository_id/auto-approval",
+                post(save_browser_repository_auto_approval),
             )
             .route(
                 "/api/v1/ui/repositories/:repository_id/uninstall",

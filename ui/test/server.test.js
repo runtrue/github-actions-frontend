@@ -169,9 +169,11 @@ test("browser script references existing unique controls", async () => {
   assert.match(script, /function loadWorkspaceVariables/);
   assert.match(script, /function saveRepositorySetting/);
   assert.match(script, /function saveRepositoryWorkflowDirectory/);
+  assert.match(script, /function saveRepositoryAutoApproval/);
   assert.match(script, /repository\.repositoryUrl/);
   assert.match(script, /function definitionLinkCard/);
   assert.match(script, /\/workflow-directory/);
+  assert.match(script, /\/auto-approval/);
   assert.match(script, /class="state-badge \$\{tone\(repository\.state\)\}"/);
   assert.doesNotMatch(script, /class="status-badge">\$\{escapeHtml\(repository\.state\)\}/);
   assert.doesNotMatch(script, /session\.avatarUrl/);
@@ -208,6 +210,20 @@ test("run details keep source links intact and defer technical metadata", async 
   assert.match(script, /detail\.webhookEvent/);
   assert.doesNotMatch(html, /id="run-summary"/);
   assert.match(styles, /\.run-log-view\.is-empty \{[^}]*background: var\(--bg\)/);
+});
+
+test("repository events keep source metadata grouped and columns aligned", async () => {
+  const [html, styles, script] = await Promise.all([
+    readFile(new URL("../public/index.html", import.meta.url), "utf8"),
+    readFile(new URL("../public/styles.css", import.meta.url), "utf8"),
+    readFile(new URL("../public/app.js", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(html, /<col class="repository-source-column">/);
+  assert.match(script, /class="repository-event-source"/);
+  assert.match(styles, /\.repository-event-source \{[^}]*display: grid;[^}]*gap: var\(--space-1\);/);
+  assert.match(styles, /\.repository-event-table th:last-child,[^}]*text-align: right;/s);
+  assert.doesNotMatch(styles, /var\(--space-7\)/);
 });
 
 test("login uses a compact centered card", async () => {

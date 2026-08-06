@@ -871,20 +871,33 @@ svg { display: block; }
 .repository-section-heading p { margin: 0; color: var(--muted); font-size: var(--text-sm); }
 .repository-section-heading p strong { color: var(--fg); font-weight: 500; }
 .repository-activity-block { padding-top: var(--space-5); border-top: 1px solid var(--border); }
-.repository-activity-block + .repository-activity-block { margin-top: var(--space-7); }
+.repository-activity-block + .repository-activity-block { margin-top: var(--space-8); }
 .repository-subsection-heading { margin-bottom: var(--space-3); display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-4); }
 .repository-subsection-heading h3 { margin: 0 0 var(--space-1); font-size: var(--text-lg); }
 .repository-subsection-heading p { max-width: 72ch; margin: 0; color: var(--muted); font-size: var(--text-xs); }
-.repository-event-table { min-width: 720px; }
-.repository-event-table td:first-child { min-width: 210px; }
-.repository-event-table td:nth-child(2) { min-width: 220px; }
-.repository-event-table td:nth-child(3) { min-width: 150px; }
+.repository-event-table { min-width: 720px; table-layout: fixed; }
+.repository-event-column { width: 26%; }
+.repository-source-column { width: 38%; }
+.repository-status-column { width: 20%; }
+.repository-received-column { width: 16%; }
+.repository-event-source { min-width: 0; display: grid; gap: var(--space-1); }
+.repository-event-source strong,
+.repository-event-source small { overflow-wrap: anywhere; }
 .repository-event-table td:nth-child(3) small { display: block; }
-.repository-event-table .date-cell { white-space: nowrap; }
+.repository-event-table th:last-child,
+.repository-event-table .date-cell { text-align: right; white-space: nowrap; }
 .repository-settings-card { margin-bottom: var(--space-6); padding: var(--space-6); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); }
 .repository-settings-card h3 { margin: 0 0 var(--space-2); font-size: var(--text-lg); }
 .repository-settings-card p { margin: 0; color: var(--muted); font-size: var(--text-sm); }
 .workflow-location-card { display: grid; grid-template-columns: minmax(220px, .7fr) minmax(320px, 1.3fr); gap: var(--space-6); }
+.repository-auto-approval-card { display: grid; grid-template-columns: minmax(220px, .7fr) minmax(320px, 1.3fr); gap: var(--space-6); }
+.policy-switch { min-height: 64px; padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-sm); display: flex; align-items: flex-start; gap: var(--space-3); cursor: pointer; }
+.policy-switch:focus-within { border-color: var(--accent); box-shadow: var(--focus-ring); }
+.policy-switch input { width: 18px; height: 18px; margin: 2px 0 0; accent-color: var(--accent); }
+.policy-switch > span { min-width: 0; display: grid; gap: var(--space-1); }
+.policy-switch strong { font-size: var(--text-sm); }
+.policy-switch small { color: var(--muted); font-size: var(--text-xs); font-weight: 400; }
+.repository-auto-approval-card .repository-settings-actions { grid-column: 2; }
 .workflow-location-card label { display: grid; gap: var(--space-2); color: var(--fg); font-size: var(--text-sm); font-weight: 600; }
 .workflow-location-card input { width: 100%; min-height: 44px; padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--fg); font: inherit; font-family: var(--font-mono); font-size: var(--text-sm); }
 .workflow-location-card input:focus-visible { outline: none; border-color: var(--accent); box-shadow: var(--focus-ring); }
@@ -1145,7 +1158,8 @@ svg { display: block; }
   .workflow-plan-bar { align-items: stretch; flex-direction: column; }
   .repository-heading-actions { justify-content: space-between; }
   .repository-section-heading > .btn { width: 100%; }
-  .workflow-location-card { grid-template-columns: 1fr; }
+  .workflow-location-card,
+  .repository-auto-approval-card { grid-template-columns: 1fr; }
   .repository-settings-actions { grid-column: 1; align-items: stretch; flex-direction: column; }
   .repository-settings-actions .btn { width: 100%; }
   .danger-zone-row { align-items: stretch; flex-direction: column; }

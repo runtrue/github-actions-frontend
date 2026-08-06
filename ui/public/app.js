@@ -615,7 +615,7 @@
     byId("audit-result-filter").innerHTML = `<option value="all">All results</option>${results.map((result) => `<option value="${escapeHtml(result)}">${escapeHtml(titleCase(result))}</option>`).join("")}`;
   }
 
-  const repositorySections = new Set(["overview", "runs", "secrets", "variables", "settings"]);
+  const repositorySections = new Set(["overview", "runs", "approvals", "secrets", "variables", "settings"]);
 
   function repositoryRoute(repository = state.activeRepository, section = state.repositorySection) {
     if (!repository) return "repositories";
@@ -679,7 +679,7 @@
       const status = repositoryEventStatus(event, run);
       const ref = event.refName ? shortRef(event.refName) : "Repository webhook";
       const handler = titleCase(event.processingStatus || "received");
-      return `<tr><td><strong class="table-primary mono">${escapeHtml(eventTypeLabel(event))}</strong><small>Delivery <span class="mono" title="${escapeHtml(event.deliveryId)}">${escapeHtml(compactId(event.deliveryId, 12))}</span></small></td><td><strong class="table-primary">@${escapeHtml(event.actorLogin || "unknown")}</strong><small>${escapeHtml(ref)} · Handler ${escapeHtml(handler)}</small></td><td><span class="state-badge ${tone(status)}">${escapeHtml(titleCase(status))}</span><small>${run ? `Run ${escapeHtml(compactId(run.id))}` : "No run created yet"}</small></td><td class="date-cell"><time datetime="${escapeHtml(event.receivedAt)}">${escapeHtml(formatDate(event.receivedAt))}</time></td></tr>`;
+      return `<tr><td><strong class="table-primary mono">${escapeHtml(eventTypeLabel(event))}</strong><small>Delivery <span class="mono" title="${escapeHtml(event.deliveryId)}">${escapeHtml(compactId(event.deliveryId, 12))}</span></small></td><td><div class="repository-event-source"><strong class="table-primary">@${escapeHtml(event.actorLogin || "unknown")}</strong><small>${escapeHtml(ref)} · Handler ${escapeHtml(handler)}</small></div></td><td><span class="state-badge ${tone(status)}">${escapeHtml(titleCase(status))}</span><small>${run ? `Run ${escapeHtml(compactId(run.id))}` : "No run created yet"}</small></td><td class="date-cell"><time datetime="${escapeHtml(event.receivedAt)}">${escapeHtml(formatDate(event.receivedAt))}</time></td></tr>`;
     }).join("");
     byId("repository-events-empty").hidden = events.length > 0;
     byId("repository-events-body").closest("table").hidden = events.length === 0;
@@ -741,6 +741,13 @@
         : "This repository overrides the server default."
       : "Loading workflow location…";
     byId("save-repository-workflow-directory").disabled = !state.repositorySettings;
+    byId("repository-auto-approve-writers").checked = settings.auto_approve_writers === true;
+    byId("repository-auto-approval-help").textContent = state.repositorySettings
+      ? settings.auto_approve_writers
+        ? "Enabled. Every triggering actor is checked live."
+        : "Disabled. Gated runs require a manual decision."
+      : "Loading policy…";
+    byId("save-repository-auto-approval").disabled = !state.repositorySettings;
   }
 
   function renderWorkspaceVariables() {
@@ -947,6 +954,22 @@
       showToast("Workflow location saved.");
     } catch (error) { showToast(error.message || "The workflow location could not be saved."); }
     finally { button.disabled = false; button.textContent = "Save location"; }
+  }
+
+  async function saveRepositoryAutoApproval(event) {
+    event.preventDefault();
+    if (!state.activeRepository) return;
+    const button = byId("save-repository-auto-approval");
+    button.disabled = true; button.textContent = "Saving…";
+    try {
+      const body = new URLSearchParams({ csrf_token: state.data.session.csrfToken, enabled: String(byId("repository-auto-approve-writers").checked) });
+      const response = await fetch(`/api/v1/ui/repositories/${encodeURIComponent(state.activeRepository.id)}/auto-approval`, { method: "POST", body, credentials: "same-origin" });
+      if (!response.ok) { const problem = await response.json().catch(() => null); throw new Error(problem?.detail || "Could not save the auto-approval policy."); }
+      state.repositorySettings = null;
+      await loadRepositorySettings(true);
+      showToast("Auto-approval policy saved.");
+    } catch (error) { showToast(error.message || "The auto-approval policy could not be saved."); }
+    finally { button.disabled = false; button.textContent = "Save policy"; }
   }
 
   function openUninstallRepository() {
@@ -1860,6 +1883,7 @@
     byId("cancel-user-dialog").addEventListener("click", () => byId("user-dialog").close());
     byId("repository-setting-form").addEventListener("submit", saveRepositorySetting);
     byId("repository-workflow-directory-form").addEventListener("submit", saveRepositoryWorkflowDirectory);
+    byId("repository-auto-approval-form").addEventListener("submit", saveRepositoryAutoApproval);
     byId("close-repository-setting").addEventListener("click", () => byId("repository-setting-dialog").close());
     byId("cancel-repository-setting").addEventListener("click", () => byId("repository-setting-dialog").close());
     byId("cancel-delete-setting").addEventListener("click", () => byId("delete-setting-dialog").close());
