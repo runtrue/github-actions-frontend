@@ -3488,14 +3488,14 @@ impl ScmTaskWorker {
         } else {
             false
         };
-        let auto_approvals = writer_authorized
-            .then(|| {
-                executions
-                    .iter()
-                    .flat_map(|execution| execution.approvals.iter().cloned())
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
+        let auto_approvals = if writer_authorized {
+            executions
+                .iter()
+                .flat_map(|execution| execution.approvals.iter().cloned())
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
         let finish_now = finish_clock()?;
         let result = self
             .store_executor
