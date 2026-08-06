@@ -2705,7 +2705,7 @@ async fn github_browser_state_response(
                 let digest = ContentDigest::sha256(event.delivery_id.as_bytes());
                 let suffix = digest.as_str().trim_start_matches("sha256:");
                 let durable_event_id = format!("event-scm-github-{suffix}");
-                let (event_action, processing_status) =
+                let (event_action, processing_status, processing_detail) =
                     match state.store.event(&durable_event_id).await {
                         Ok(durable) => {
                             let action = durable
@@ -2713,18 +2713,21 @@ async fn github_browser_state_response(
                                 .pointer("/event_type/action")
                                 .and_then(Value::as_str)
                                 .map(str::to_owned);
-                            let status = match state.store.task(&durable.task_id).await {
-                                Ok(task) => match task.status {
-                                    DurableTaskStatus::Pending => "pending",
-                                    DurableTaskStatus::Claimed => "processing",
-                                    DurableTaskStatus::Completed => "completed",
-                                    DurableTaskStatus::Failed => "failed",
-                                },
-                                Err(_) => "received",
+                            let (status, detail) = match state.store.task(&durable.task_id).await {
+                                Ok(task) => {
+                                    let status = match task.status {
+                                        DurableTaskStatus::Pending => "pending",
+                                        DurableTaskStatus::Claimed => "processing",
+                                        DurableTaskStatus::Completed => "completed",
+                                        DurableTaskStatus::Failed => "failed",
+                                    };
+                                    (status, task.last_error)
+                                }
+                                Err(_) => ("received", None),
                             };
-                            (action, status.to_owned())
+                            (action, status.to_owned(), detail)
                         }
-                        Err(_) => (None, "received".to_owned()),
+                        Err(_) => (None, "received".to_owned(), None),
                     };
                 events.push(GitHubRepositoryEventView {
                     delivery_id: event.delivery_id,
@@ -2734,6 +2737,7 @@ async fn github_browser_state_response(
                     event_kind: event.event_kind,
                     event_action,
                     processing_status,
+                    processing_detail,
                     actor_login: event.actor_login,
                     ref_name: event.ref_name,
                     received_at: match timestamp(event.received_unix_ms) {

@@ -152,10 +152,13 @@ fn run(args: Args) -> Result<(), String> {
     for connection in listener.incoming() {
         match connection {
             Ok(mut stream) => {
-                let response = handle(&args, &mut stream).unwrap_or_else(|error| BuildResponse {
-                    protocol_version: 1,
-                    image: None,
-                    error: Some(error),
+                let response = handle(&args, &mut stream).unwrap_or_else(|error| {
+                    eprintln!("runtrue-action-builder: repository action build rejected: {error}");
+                    BuildResponse {
+                        protocol_version: 1,
+                        image: None,
+                        error: Some(error),
+                    }
                 });
                 let _ = serde_json::to_writer(&mut stream, &response);
                 let _ = stream.flush();

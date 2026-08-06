@@ -77,6 +77,7 @@ mod tests {
                 event_kind: "push".to_owned(),
                 event_action: None,
                 processing_status: "pending".to_owned(),
+                processing_detail: None,
                 actor_login: "ada".to_owned(),
                 ref_name: Some("refs/heads/main".to_owned()),
                 received_at: "2026-07-13T00:00:00Z".to_owned(),

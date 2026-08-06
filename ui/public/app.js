@@ -169,9 +169,9 @@
       case "processing":
         return { status: "processing", label: "Processing", detail: "Handler in progress" };
       case "completed":
-        return { status: "no_run", label: "No run", detail: "Handled without creating a run" };
+        return { status: "warning", label: "No workflow run", detail: "No workflow matched, or workflow preparation was rejected" };
       case "failed":
-        return { status: "failed", label: "Failed", detail: "Handler failed before creating a run" };
+        return { status: "failed", label: "Workflow preparation failed", detail: event.processingDetail || "Handler failed before creating a run" };
       default:
         return { status: "received", label: "Received", detail: "No handler scheduled" };
     }

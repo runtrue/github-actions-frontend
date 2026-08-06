@@ -64,6 +64,7 @@ pub fn github_installations_payload(page: &GitHubInstallationsPage) -> Value {
                 "eventKind": event.event_kind,
                 "eventAction": event.event_action,
                 "processingStatus": event.processing_status,
+                "processingDetail": event.processing_detail,
                 "actorLogin": event.actor_login,
                 "refName": event.ref_name,
                 "receivedAt": event.received_at,
