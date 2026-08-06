@@ -1013,30 +1013,6 @@ async fn wait_for_job_state(control: &ControlPlane, state: JobState) {
     .expect("job state timeout");
 }
 
-async fn wait_for_running_step(service: &RunnerControlService, lease_id: &str, step_id: &str) {
-    tokio::time::timeout(Duration::from_secs(1), async {
-        loop {
-            let running = service
-                .session("runner-1")
-                .and_then(|session| {
-                    Ok(session
-                        .state()?
-                        .running_steps
-                        .get(&(lease_id.to_owned(), 1))
-                        .cloned())
-                })
-                .ok()
-                .flatten();
-            if running.as_deref() == Some(step_id) {
-                return;
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("running step timeout");
-}
-
 fn runner_message(body: runner_message::Body) -> Result<v1::RunnerMessage, Status> {
     Ok(v1::RunnerMessage { body: Some(body) })
 }
@@ -1522,7 +1498,16 @@ async fn secret_and_oidc_brokers_require_exact_live_step_and_are_one_use() {
         )))
         .await
         .expect("running step");
-    wait_for_running_step(&fixture.service, &fixture.lease.id, "publish").await;
+    // The broker RPC travels on a separate HTTP/2 stream and may arrive before
+    // the control stream records the running-step transition.
+
+    let delivered = fixture
+        .service
+        .request_secret_authenticated(&identity, secret_request.clone())
+        .await
+        .expect("secret delivery");
+    assert_eq!(delivered.delivery_kind, ENVELOPE_DELIVERY_KIND);
+    assert!(delivered.encrypted_envelope.starts_with(b"ANVSEC01"));
 
     let mut unsigned_attempt = secret_request.clone();
     unsigned_attempt.job_attempt = 2;
@@ -1536,13 +1521,6 @@ async fn secret_and_oidc_brokers_require_exact_live_step_and_are_one_use() {
         tonic::Code::PermissionDenied
     );
 
-    let delivered = fixture
-        .service
-        .request_secret_authenticated(&identity, secret_request.clone())
-        .await
-        .expect("secret delivery");
-    assert_eq!(delivered.delivery_kind, ENVELOPE_DELIVERY_KIND);
-    assert!(delivered.encrypted_envelope.starts_with(b"ANVSEC01"));
     assert_eq!(
         fixture
             .service
