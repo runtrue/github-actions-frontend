@@ -83,8 +83,11 @@ plane resolves an action reference such as
 `ci/ai-review@154a9442ef3217b6a9b400c00a486b68fe221b6a`, checks the trusted action
 metadata at that exact commit, and asks `action-builder` to build a Dockerfile
 action only when its immutable build result is not already cached. The builder
-uses the host Docker Engine and Buildx, exports an OCI archive, and passes it to
-`action-admission`. Admission imports the image into the same rootless Podman
+automatically provisions a deployment-scoped Buildx `docker-container` driver
+on the host Docker Engine, exports an OCI archive, and passes it to
+`action-admission`. The dedicated driver is required because Docker's default
+`docker` driver cannot export OCI archives unless the daemon uses the
+containerd image store. Admission imports the image into the same rootless Podman
 store mounted by autoscaled runners and writes a signed manifest into the
 shared runtime assets.
 

@@ -44,6 +44,7 @@ RUNTRUE_AUTOSCALER_CLAIM_ROOT=/var/lib/runtrue-autoscaler/runtrue-test/claims
 RUNTRUE_RUNNER_IMAGE=ghcr.io/runtrue/runtrue-runner@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 RUNTRUE_ACTION_ADMISSION_CONTAINER=runtrue-test-action-admission
 RUNTRUE_REPOSITORY_ACTION_IMAGE_REPOSITORY=runtrue.local/repository-actions
+RUNTRUE_REPOSITORY_ACTION_BUILDX_BUILDER=runtrue-test-repository-actions
 RUNTRUE_REPOSITORY_ACTION_ALLOWED_BASE_IMAGES=node:22-bookworm-slim@sha256:53ada149d435c38b14476cb57e4a7da73c15595aba79bd6971b547ceb6d018bf
 RUNTRUE_GITHUB_APP_CREDENTIAL_REFERENCE=provider://github-app/production
 EOF
@@ -55,6 +56,7 @@ docker compose \
 
 python3 - "${temporary}/compose.json" <<'PY'
 import json
+import subprocess
 import sys
 
 with open(sys.argv[1], encoding="utf-8") as source:
@@ -87,6 +89,18 @@ if "action-admission" not in builder.get("depends_on", {}):
     raise SystemExit("action builder does not require admission to be healthy")
 if builder.get("network_mode") != "none":
     raise SystemExit("action builder must not join a Compose network")
+builder_command = " ".join(builder.get("command", []))
+syntax = subprocess.run(
+    ["/bin/sh", "-n"], input=builder_command, text=True, capture_output=True, check=False
+)
+if syntax.returncode != 0:
+    raise SystemExit(f"action builder bootstrap command is invalid: {syntax.stderr.strip()}")
+if "--driver docker-container" not in builder_command:
+    raise SystemExit("action builder does not provision an OCI-capable Buildx driver")
+if "--buildx-builder" not in builder_command or "runtrue-test-repository-actions" not in builder_command:
+    raise SystemExit("action builder does not use the deployment-scoped Buildx builder")
+if builder.get("environment", {}).get("DOCKER_CONFIG") != "/var/lib/runtrue-action-builder/docker-config":
+    raise SystemExit("action builder does not persist its Buildx client configuration")
 
 admission = services["action-admission"]
 if admission.get("network_mode") != "none" or not admission.get("privileged"):
