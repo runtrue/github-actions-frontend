@@ -254,8 +254,15 @@ impl RepositoryActionBuilder for UnixRepositoryActionBuilder {
         }
         let response: BuildResponse = serde_json::from_slice(&response)
             .map_err(|_| RepositoryActionResolveError::Rejected)?;
-        if response.protocol_version != 1 || response.error.is_some() {
+        if response.protocol_version != 1 {
             return Err(RepositoryActionResolveError::Rejected);
+        }
+        if let Some(error) = response.error {
+            let error = bounded_builder_error(&error);
+            eprintln!("repository action builder rejected request: {error}");
+            return Err(RepositoryActionResolveError::BuildRejected(
+                error.into_boxed_str(),
+            ));
         }
         let image = response
             .image
@@ -264,6 +271,26 @@ impl RepositoryActionBuilder for UnixRepositoryActionBuilder {
             return Err(RepositoryActionResolveError::Rejected);
         }
         Ok(image)
+    }
+}
+
+fn bounded_builder_error(value: &str) -> String {
+    let value = value
+        .chars()
+        .map(|character| {
+            if character.is_ascii_control() {
+                ' '
+            } else {
+                character
+            }
+        })
+        .take(512)
+        .collect::<String>();
+    let value = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    if value.is_empty() {
+        "repository action builder rejected the request".to_owned()
+    } else {
+        value
     }
 }
 
@@ -396,6 +423,19 @@ mod tests {
             }),
             Err(RepositoryActionResolveError::Rejected)
         ));
+    }
+
+    #[test]
+    fn builder_rejection_details_are_bounded_and_single_line() {
+        let detail = format!("  policy\nrejected\t{}", "x".repeat(600));
+        let bounded = bounded_builder_error(&detail);
+        assert!(bounded.starts_with("policy rejected "));
+        assert!(!bounded.contains(char::is_control));
+        assert!(bounded.chars().count() <= 512);
+        assert_eq!(
+            bounded_builder_error("\n\t"),
+            "repository action builder rejected the request"
+        );
     }
 
     fn initialize_repository(path: &Path) {

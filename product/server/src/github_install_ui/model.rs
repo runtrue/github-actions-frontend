@@ -284,6 +284,7 @@ pub struct GitHubRepositoryEventView {
     pub event_kind: String,
     pub event_action: Option<String>,
     pub processing_status: String,
+    pub processing_detail: Option<String>,
     pub actor_login: String,
     pub ref_name: Option<String>,
     pub received_at: String,

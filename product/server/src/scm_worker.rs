@@ -1133,6 +1133,8 @@ pub enum RepositoryActionResolveError {
     Unauthorized,
     #[error("repository action metadata or source was rejected")]
     Rejected,
+    #[error("repository action build was rejected: {0}")]
+    BuildRejected(Box<str>),
     #[error("repository action preparation is temporarily unavailable")]
     Unavailable,
 }
@@ -2632,6 +2634,9 @@ impl ScmTaskWorker {
                     RepositoryActionResolveError::Rejected => TaskFailure::terminal(
                         "repository action source, metadata, or build was rejected",
                     ),
+                    RepositoryActionResolveError::BuildRejected(reason) => {
+                        TaskFailure::terminal(format!("Repository action build rejected: {reason}"))
+                    }
                 })?;
             if prepared.reference != request.source_reference() {
                 return Err(TaskFailure::terminal(
@@ -4272,7 +4277,7 @@ impl ScmTaskWorker {
         } else {
             None
         };
-        let error = bounded_failure_message(failure.message);
+        let error = bounded_failure_message(&failure.message);
         if task.kind == SCM_CONTINUATION_TASK_KIND && retry_at.is_none() {
             let payload: ScmContinuationPayload = serde_json::from_value(task.payload.clone())
                 .map_err(|_| ControlPlaneError::InvalidInput("invalid SCM continuation payload"))?;
@@ -4734,25 +4739,25 @@ impl From<ControlPlaneError> for ProcessError {
 
 #[derive(Debug)]
 struct TaskFailure {
-    message: &'static str,
+    message: Box<str>,
     retryable: bool,
     retry_after_ms: Option<u64>,
     source: Option<ControlPlaneError>,
 }
 
 impl TaskFailure {
-    const fn terminal(message: &'static str) -> Self {
+    fn terminal(message: impl Into<String>) -> Self {
         Self {
-            message,
+            message: message.into().into_boxed_str(),
             retryable: false,
             retry_after_ms: None,
             source: None,
         }
     }
 
-    const fn retryable(message: &'static str) -> Self {
+    fn retryable(message: impl Into<String>) -> Self {
         Self {
-            message,
+            message: message.into().into_boxed_str(),
             retryable: true,
             retry_after_ms: None,
             source: None,
@@ -4761,7 +4766,7 @@ impl TaskFailure {
 
     fn rate_limited(message: &'static str, retry_after_seconds: u64) -> Self {
         Self {
-            message,
+            message: message.into(),
             retryable: true,
             retry_after_ms: retry_after_seconds.checked_mul(1_000),
             source: None,
@@ -4783,7 +4788,7 @@ impl TaskFailure {
             _ => "control-plane commit for SCM event failed",
         };
         Self {
-            message,
+            message: message.into(),
             retryable,
             retry_after_ms: None,
             source: Some(source),
@@ -5382,7 +5387,7 @@ fn require_directory_identity(
     Ok(())
 }
 
-fn bounded_failure_message(message: &'static str) -> String {
+fn bounded_failure_message(message: &str) -> String {
     message.chars().take(MAX_FAILURE_BYTES).collect()
 }
 

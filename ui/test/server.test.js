@@ -225,7 +225,8 @@ test("repository events keep source metadata grouped and columns aligned", async
   assert.match(script, /class="repository-event-source"/);
   assert.match(script, /function runsForEvent\(event, runs\)/);
   assert.match(script, /`\$\{runs\.length\} \$\{runs\.length === 1 \? "run" : "runs"\} created`/);
-  assert.match(script, /case "completed":\s*return \{ status: "no_run", label: "No run", detail: "Handled without creating a run" \}/);
+  assert.match(script, /case "completed":\s*return \{ status: "warning", label: "No workflow run", detail: "No workflow matched, or workflow preparation was rejected" \}/);
+  assert.match(script, /event\.processingDetail \|\| "Handler failed before creating a run"/);
   assert.match(script, /case "processing":\s*return \{ status: "processing", label: "Processing", detail: "Handler in progress" \}/);
   assert.match(script, /default:\s*return \{ status: "received", label: "Received", detail: "No handler scheduled" \}/);
   assert.doesNotMatch(script, /No run created yet/);
