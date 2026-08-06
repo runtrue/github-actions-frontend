@@ -23,8 +23,10 @@ const NETWORK_NONE_BUILD_POLICY_ID: &str =
     "runtrue.repository-action-build.v2.network-none.pinned-materials";
 const NETWORK_DEFAULT_BUILD_POLICY_ID: &str =
     "runtrue.repository-action-build.v3.network-default.pinned-materials";
-const BUILD_ENVIRONMENT_ID: &str =
+const DOCKER_BUILD_ENVIRONMENT_ID: &str =
     "runtrue.buildkit.v0.26.2.docker-driver.no-insecure-entitlements";
+const DOCKER_CONTAINER_BUILD_ENVIRONMENT_ID: &str =
+    "runtrue.buildkit.v0.26.2.docker-container-driver.no-insecure-entitlements";
 const MAX_ALLOWED_BASE_IMAGES: usize = 32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -396,7 +398,11 @@ fn validate_args(args: &Args) -> Result<(), String> {
         || args.buildx_builder.is_empty()
         || args.buildx_builder.len() > 128
         || args.build_policy_id != args.build_network.policy_id()
-        || args.build_environment_id != BUILD_ENVIRONMENT_ID
+        || ![
+            DOCKER_BUILD_ENVIRONMENT_ID,
+            DOCKER_CONTAINER_BUILD_ENVIRONMENT_ID,
+        ]
+        .contains(&args.build_environment_id.as_str())
         || allowed_base_images.is_empty()
         || allowed_base_images.len() > MAX_ALLOWED_BASE_IMAGES
         || allowed_base_images
@@ -417,7 +423,7 @@ fn build_cache_id(args: &Args, request: &BuildRequest) -> String {
         format!(
             "runtrue.repository-action-cache.v3\0{}\0{}\0{}\0{}\0{}\0{}",
             args.build_policy_id,
-            BUILD_ENVIRONMENT_ID,
+            args.build_environment_id,
             args.build_network.as_buildx_value(),
             material_policy_digest,
             args.image_repository,
@@ -455,7 +461,8 @@ fn buildx_arguments(
         )),
         OsString::from("--label"),
         OsString::from(format!(
-            "org.runtrue.build-environment.id={BUILD_ENVIRONMENT_ID}"
+            "org.runtrue.build-environment.id={}",
+            args.build_environment_id
         )),
         OsString::from("--label"),
         OsString::from(format!(
@@ -767,7 +774,7 @@ mod tests {
             buildx_builder: "runtrue-actions-builder".to_owned(),
             build_network: BuildNetwork::None,
             build_policy_id: NETWORK_NONE_BUILD_POLICY_ID.to_owned(),
-            build_environment_id: BUILD_ENVIRONMENT_ID.to_owned(),
+            build_environment_id: DOCKER_BUILD_ENVIRONMENT_ID.to_owned(),
             allowed_base_image: vec![NODE_BASE.to_owned()],
             admit_command: None,
             socket_gid: Some(1000),
@@ -863,6 +870,11 @@ mod tests {
         networked.build_policy_id = NETWORK_DEFAULT_BUILD_POLICY_ID.to_owned();
         assert!(validate_args(&networked).is_ok());
         assert_ne!(first, build_cache_id(&networked, &request()));
+
+        let mut container_driver = networked;
+        container_driver.build_environment_id = DOCKER_CONTAINER_BUILD_ENVIRONMENT_ID.to_owned();
+        assert!(validate_args(&container_driver).is_ok());
+        assert_ne!(first, build_cache_id(&container_driver, &request()));
     }
 
     #[test]
@@ -890,7 +902,7 @@ mod tests {
             argument == &format!("org.runtrue.build-policy.id={NETWORK_NONE_BUILD_POLICY_ID}")
         }));
         assert!(arguments.iter().any(|argument| {
-            argument == &format!("org.runtrue.build-environment.id={BUILD_ENVIRONMENT_ID}")
+            argument == &format!("org.runtrue.build-environment.id={DOCKER_BUILD_ENVIRONMENT_ID}")
         }));
         assert!(arguments
             .iter()
