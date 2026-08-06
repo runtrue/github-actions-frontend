@@ -1,6 +1,6 @@
 use super::*;
 #[test]
-fn supported_workflow_emits_compiler_validated_native_yaml_and_exact_lock() {
+fn supported_workflow_emits_compiler_validated_native_yaml_with_immutable_images() {
     let result = import_github_actions(SUPPORTED, "supported.yml").unwrap();
     assert!(result.report.compatible, "{}", result.report.render_human());
     assert!(result.report.native_ast_validated);
@@ -17,15 +17,7 @@ fn supported_workflow_emits_compiler_validated_native_yaml_and_exact_lock() {
     assert_eq!(workflow.jobs["prepare"].services.len(), 1);
     assert_eq!(workflow.jobs["prepare"].outputs.len(), 1);
 
-    let lock_text = result.lockfile_toml.as_deref().expect("service lock");
-    let lock = LockFile::parse(lock_text.as_bytes()).unwrap();
-    assert_eq!(lock.images().len(), 1);
-    assert_eq!(
-        lock.images()[0].source(),
-        "postgres@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-    );
-    assert_eq!(lock.images()[0].source(), lock.images()[0].resolved());
-    assert!(!lock_text.contains("0123456789abcdef"));
+    assert!(result.lockfile_toml.is_none());
 
     assert!(result.report.findings.iter().any(|finding| {
         finding.code == "native-buildkit-build" && finding.status == CompatibilityStatus::Emulated
@@ -36,7 +28,7 @@ fn supported_workflow_emits_compiler_validated_native_yaml_and_exact_lock() {
 }
 
 #[test]
-fn pinned_job_containers_become_locked_oci_runner_images_only_for_container_jobs() {
+fn pinned_job_containers_become_immutable_oci_runner_images_only_for_container_jobs() {
     let image = format!("registry.example/build@sha256:{}", "c".repeat(64));
     let source = format!(
         r#"
@@ -73,10 +65,7 @@ jobs:
     );
     assert_eq!(workflow.jobs["host"].runner.image, None);
 
-    let lock = LockFile::parse(result.lockfile_toml.as_deref().unwrap().as_bytes()).unwrap();
-    assert_eq!(lock.images().len(), 1);
-    assert_eq!(lock.images()[0].source(), image);
-    assert_eq!(lock.images()[0].resolved(), image);
+    assert!(result.lockfile_toml.is_none());
     assert!(result.report.findings.iter().any(|finding| {
         finding.code == "pinned-job-container-image"
             && finding.status == CompatibilityStatus::Supported
@@ -140,8 +129,7 @@ jobs:
     );
     assert!(yaml.contains("container:"));
     assert!(yaml.contains("INPUT_CONFIG-PATH"));
-    let lock = LockFile::parse(result.lockfile_toml.as_deref().unwrap().as_bytes()).unwrap();
-    assert_eq!(lock.images()[0].source(), image);
+    assert!(result.lockfile_toml.is_none());
     assert!(result.report.findings.iter().any(|finding| {
         finding.code == "pinned-container-action" && finding.status == CompatibilityStatus::Emulated
     }));

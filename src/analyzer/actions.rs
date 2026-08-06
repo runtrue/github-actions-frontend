@@ -594,11 +594,13 @@ impl Analyzer {
                 purpose: "provider-api".to_owned(),
             });
         }
-        self.lock_images.insert(crate::native::GeneratedImageLock {
-            source: source.to_owned(),
-            resolved: image.to_owned(),
-            platform: "linux/amd64".to_owned(),
-        });
+        if source != image {
+            self.lock_images.insert(crate::native::GeneratedImageLock {
+                source: source.to_owned(),
+                resolved: image.to_owned(),
+                platform: "linux/amd64".to_owned(),
+            });
+        }
         self.finding(
             CompatibilityStatus::Emulated,
             finding_code,

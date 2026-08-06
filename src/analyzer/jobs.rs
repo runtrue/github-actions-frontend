@@ -4,7 +4,7 @@ use super::{
 };
 use crate::{
     github::{GithubJob, GithubService, GithubStrategy},
-    native::{GeneratedImageLock, NativeJob, NativeRunner, NativeService, PermissionState},
+    native::{NativeJob, NativeRunner, NativeService, PermissionState},
     report::CompatibilityStatus,
     validation::{is_full_sha256_image, valid_identifier, yaml_text},
 };
@@ -156,11 +156,6 @@ impl Analyzer {
         if runner_image.is_none() && !effects.wasm_component {
             if let Some(image) = self.default_job_container_image.clone() {
                 if is_full_sha256_image(&image) {
-                    self.lock_images.insert(GeneratedImageLock {
-                        source: image.clone(),
-                        resolved: image.clone(),
-                        platform: "linux/amd64".to_owned(),
-                    });
                     self.finding(
                         CompatibilityStatus::Supported,
                         "operator-default-job-container",
@@ -635,16 +630,11 @@ impl Analyzer {
             return None;
         }
 
-        self.lock_images.insert(GeneratedImageLock {
-            source: image.clone(),
-            resolved: image.clone(),
-            platform: "linux/amd64".to_owned(),
-        });
         self.finding(
             CompatibilityStatus::Supported,
             "pinned-job-container-image",
             format!("{path}.image"),
-            "immutable job container maps to the exact native OCI runner image lock",
+            "immutable job container maps directly to the native OCI runner image",
             None,
         );
         Some(image)
@@ -873,16 +863,11 @@ impl Analyzer {
             );
             return None;
         }
-        self.lock_images.insert(GeneratedImageLock {
-            source: image.clone(),
-            resolved: image.clone(),
-            platform: "linux/amd64".to_owned(),
-        });
         self.finding(
             CompatibilityStatus::Supported,
             "pinned-service-image",
             path,
-            "immutable service image is preserved through an exact native lock requirement",
+            "immutable service image is preserved directly in the native workflow",
             None,
         );
         Some(image)
