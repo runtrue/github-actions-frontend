@@ -15,9 +15,11 @@ for required in \
   RUNTRUE_DOCKERHUB_USERNAME \
   RUNTRUE_DOCKERHUB_TOKEN_SOURCE \
   'https://index.docker.io/v1/' \
-  'repository-actions/builder/docker-config/config.json'; do
+  'repository-actions/builder/docker-config/config.json' \
+  '.bundle-image-id' \
+  'refreshing stale or incomplete runner runtime bundle'; do
   [[ "$installer" == *"$required"* ]] || {
-    printf 'quickstart installer is missing Docker Hub credential support: %s\n' "$required" >&2
+    printf 'quickstart installer is missing required deployment support: %s\n' "$required" >&2
     exit 1
   }
 done

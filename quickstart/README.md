@@ -190,13 +190,19 @@ and never uploads it. The runner and bundle image settings are optional
 overrides; no runtime source path, preloaded OCI image, lock file, or
 compatibility digest is required in `quick-start.env`.
 
+The installer records the exact runtime-bundle image ID and refreshes the
+installed bundle whenever its configured image advances. The deployment's
+private Wasm runtime key is preserved during that replacement. This prevents
+an older signed component manifest from remaining installed after a runner
+upgrade.
+
 The installer pulls `ghcr.io/runtrue/runtrue-runner:latest`, resolves its
 immutable registry digest, hashes the runner executable from that exact image,
 and binds the executable identity into the fleet configuration. A generic
 operator-approved Docker template is bound to each queued job's exact runtime
 compatibility digest when the autoscaler launches a runner.
-When `latest` advances, rerunning the installer updates the runner template and
-fleet configuration while preserving the already installed runtime assets.
+When `latest` advances, rerunning the installer updates the runner template,
+runtime bundle, and fleet configuration.
 
 Only the autoscaler receives the Docker socket. Generated runner containers are
 ephemeral, bounded to one concurrent job, and receive `/dev/fuse` plus outer
