@@ -174,6 +174,20 @@ runtime compatibility digest. `RUNTRUE_AUTOSCALER_SCALE_UP_BATCH` defaults to
 the maximum worker count, allowing queued demand to launch the required fleet
 in one reconciliation; set it lower only to deliberately ramp up gradually.
 
+`RUNTRUE_AUTOSCALER_MAXIMUM_WORKERS` is a ceiling, not reserved capacity. The
+Docker provider also limits concurrency from the host's CPU and memory. Each
+runner reserves 2 CPUs and 6 GiB by default, while 2 CPUs and 4 GiB remain for
+the host and Runtrue services. The installer prints the resulting effective
+capacity. These four byte/nano-CPU settings can be tuned explicitly when the
+host sizing or workload profile differs:
+
+```sh
+RUNTRUE_RUNNER_MEMORY_BYTES=6442450944
+RUNTRUE_RUNNER_NANO_CPUS=2000000000
+RUNTRUE_AUTOSCALER_CAPACITY_RESERVE_MEMORY_BYTES=4294967296
+RUNTRUE_AUTOSCALER_CAPACITY_RESERVE_NANO_CPUS=2000000000
+```
+
 Webhook and workflow preparation happens before autoscaled runners receive
 jobs. Quickstart processes four SCM tasks concurrently by default. For a busy
 installation, set `RUNTRUE_SCM_WORKERS` independently (between 1 and 32) in

@@ -64,11 +64,11 @@
     "tmp",
     "oci-state"
   ],
-  "memory_bytes": 6442450944,
-  "nano_cpus": 2000000000,
+  "memory_bytes": __RUNTRUE_RUNNER_MEMORY_BYTES__,
+  "nano_cpus": __RUNTRUE_RUNNER_NANO_CPUS__,
   "pids_limit": 768,
-  "capacity_reserve_memory_bytes": 4294967296,
-  "capacity_reserve_nano_cpus": 2000000000,
+  "capacity_reserve_memory_bytes": __RUNTRUE_AUTOSCALER_CAPACITY_RESERVE_MEMORY_BYTES__,
+  "capacity_reserve_nano_cpus": __RUNTRUE_AUTOSCALER_CAPACITY_RESERVE_NANO_CPUS__,
   "tmpfs": {
     "/tmp": "rw,noexec,nosuid,nodev,size=134217728,mode=1777",
     "/run": "rw,noexec,nosuid,nodev,size=16777216,mode=0755"
