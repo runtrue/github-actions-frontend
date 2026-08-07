@@ -15,6 +15,8 @@ for required in \
   RUNTRUE_DOCKERHUB_USERNAME \
   RUNTRUE_DOCKERHUB_TOKEN_SOURCE \
   RUNTRUE_AUTOSCALER_SCALE_UP_BATCH \
+  RUNTRUE_EFFECTIVE_RUNNER_CAPACITY \
+  RUNTRUE_RUNNER_MEMORY_BYTES \
   '"scale_up_batch": int(scale_up_batch)' \
   'https://index.docker.io/v1/' \
   'repository-actions/builder/docker-config/config.json' \
