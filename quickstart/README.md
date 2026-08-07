@@ -37,7 +37,11 @@ Compose configuration are updated,
 containers are reconciled, and existing database, TLS, signing, and webhook
 secrets are preserved. Changed private credential contents and changes to the
 installation identity (public origin, GitHub App, state root, or Compose project
-name) are rejected and require an explicit migration. The project name is
+name) are rejected and require an explicit migration. Existing deployments
+with a different database installation ID can preserve it with
+`RUNTRUE_INSTALLATION_ID`. Likewise, migrations must preserve the registered
+GitHub App provider identity with `RUNTRUE_GITHUB_APP_CREDENTIAL_REFERENCE`.
+The project name is
 derived from the install root, preventing multiple installations on one host
 from colliding.
 

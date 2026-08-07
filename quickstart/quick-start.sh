@@ -343,7 +343,7 @@ PY
 }
 
 install_capsule_trust_key() {
-  local bearer=$1 response status parsed key_name public_key destination temporary
+  local bearer=$1 response status parsed key_name public_key destination temporary candidate recovery=''
   response=$(control_plane_request \
     "$bearer" GET /api/v1/runner-pools/trust/capsule-key)
   status=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])' <<<"$response")
@@ -381,12 +381,29 @@ PY
     "$RUNTRUE_RUNTIME_UID" \
     "$RUNTRUE_RUNTIME_GID"
   rm -f -- "$temporary"
+
+  # Older deployments used a descriptive filename for this same key. The
+  # runner rejects duplicate key identities even when their bytes match, so
+  # retain obsolete aliases outside the active keyring during migration.
+  while IFS= read -r -d '' candidate; do
+    [[ "$candidate" == "$destination" ]] && continue
+    [[ -f "$candidate" && ! -L "$candidate" ]] || die "unsafe capsule trust key: ${candidate}"
+    cmp -s -- "$candidate" "$destination" || continue
+    if [[ -z "$recovery" ]]; then
+      install -d -m 0700 -- "${RUNTRUE_INSTALL_ROOT}/recovery"
+      recovery="${RUNTRUE_INSTALL_ROOT}/recovery/capsule-key-aliases.$(openssl rand -hex 8)"
+      install -d -m 0700 -- "$recovery"
+    fi
+    mv -- "$candidate" "$recovery/"
+    printf 'quick-start: duplicate capsule trust key alias retained for recovery at %s\n' "$recovery" >&2
+  done < <(find "${RUNTRUE_STATE_DIR}/runner-trust/capsule-keys" -mindepth 1 -maxdepth 1 -type f -name '*.hex' -print0)
 }
 
 write_runtime_environment() {
   local destination=$1 temporary api_origin key value
-  local existing_project='' existing_state_dir='' existing_claim_root='' existing_public_origin=''
+  local existing_project='' existing_installation_id='' existing_state_dir='' existing_claim_root='' existing_public_origin=''
   local existing_github_origin='' existing_app_id='' existing_app_slug='' existing_oauth_client_id=''
+  local existing_credential_reference=''
   if [[ "$RUNTRUE_GITHUB_WEB_ORIGIN" == https://github.com ]]; then
     api_origin=https://api.github.com
   else
@@ -401,6 +418,7 @@ write_runtime_environment() {
     printf 'RUNTRUE_DOCKER_BINARY=%s\n' "$RUNTRUE_DOCKER_BINARY"
     printf 'RUNTRUE_DOCKER_BUILDX_PLUGIN=%s\n' "$RUNTRUE_DOCKER_BUILDX_PLUGIN"
     printf 'RUNTRUE_COMPOSE_PROJECT_NAME=%s\n' "$RUNTRUE_COMPOSE_PROJECT_NAME"
+    printf 'RUNTRUE_INSTALLATION_ID=%s\n' "$RUNTRUE_INSTALLATION_ID"
     printf 'COMPOSE_PROFILES=%s\n' "$RUNTRUE_COMPOSE_PROFILES"
     printf 'RUNTRUE_STATE_DIR=%s\n' "$RUNTRUE_STATE_DIR"
     printf 'RUNTRUE_PUBLIC_ORIGIN=%s\n' "$RUNTRUE_PUBLIC_ORIGIN"
@@ -431,7 +449,7 @@ write_runtime_environment() {
     printf 'RUNTRUE_REPOSITORY_ACTION_IMAGE_REPOSITORY=%s\n' "$RUNTRUE_REPOSITORY_ACTION_IMAGE_REPOSITORY"
     printf 'RUNTRUE_REPOSITORY_ACTION_BUILDX_BUILDER=%s\n' "$RUNTRUE_REPOSITORY_ACTION_BUILDX_BUILDER"
     printf 'RUNTRUE_REPOSITORY_ACTION_ALLOWED_BASE_IMAGES=%s\n' "$RUNTRUE_REPOSITORY_ACTION_ALLOWED_BASE_IMAGES"
-    printf 'RUNTRUE_GITHUB_APP_CREDENTIAL_REFERENCE=provider://github-app/production\n'
+    printf 'RUNTRUE_GITHUB_APP_CREDENTIAL_REFERENCE=%s\n' "$RUNTRUE_GITHUB_APP_CREDENTIAL_REFERENCE"
   } >"$temporary"
   chmod 0600 -- "$temporary"
   chown "${RUNTRUE_RUNTIME_UID}:${RUNTRUE_RUNTIME_GID}" -- "$temporary"
@@ -441,6 +459,7 @@ write_runtime_environment() {
     while IFS='=' read -r key value; do
       case "$key" in
         RUNTRUE_COMPOSE_PROJECT_NAME) existing_project=$value ;;
+        RUNTRUE_INSTALLATION_ID) existing_installation_id=$value ;;
         RUNTRUE_STATE_DIR) existing_state_dir=$value ;;
         RUNTRUE_AUTOSCALER_CLAIM_ROOT) existing_claim_root=$value ;;
         RUNTRUE_PUBLIC_ORIGIN) existing_public_origin=$value ;;
@@ -448,16 +467,20 @@ write_runtime_environment() {
         RUNTRUE_GITHUB_APP_ID) existing_app_id=$value ;;
         RUNTRUE_GITHUB_APP_SLUG) existing_app_slug=$value ;;
         RUNTRUE_GITHUB_OAUTH_CLIENT_ID) existing_oauth_client_id=$value ;;
+        RUNTRUE_GITHUB_APP_CREDENTIAL_REFERENCE) existing_credential_reference=$value ;;
       esac
     done <"$destination"
     if [[ "$existing_project" != "$RUNTRUE_COMPOSE_PROJECT_NAME" ||
+          ( -n "$existing_installation_id" && "$existing_installation_id" != "$RUNTRUE_INSTALLATION_ID" ) ||
           "$existing_state_dir" != "$RUNTRUE_STATE_DIR" ||
           ( -n "$existing_claim_root" && "$existing_claim_root" != "$RUNTRUE_AUTOSCALER_CLAIM_ROOT" ) ||
           "$existing_public_origin" != "$RUNTRUE_PUBLIC_ORIGIN" ||
           "$existing_github_origin" != "$RUNTRUE_GITHUB_WEB_ORIGIN" ||
           "$existing_app_id" != "$RUNTRUE_GITHUB_APP_ID" ||
           "$existing_app_slug" != "$RUNTRUE_GITHUB_APP_SLUG" ||
-          "$existing_oauth_client_id" != "$RUNTRUE_GITHUB_OAUTH_CLIENT_ID" ]]; then
+          "$existing_oauth_client_id" != "$RUNTRUE_GITHUB_OAUTH_CLIENT_ID" ||
+          ( -n "$existing_credential_reference" &&
+            "$existing_credential_reference" != "$RUNTRUE_GITHUB_APP_CREDENTIAL_REFERENCE" ) ]]; then
       rm -f -- "$temporary"
       die 'installation identity cannot change on a rerun; use a new install root or an explicit migration'
     fi
@@ -531,6 +554,8 @@ RUNTRUE_AUTOSCALER_IDLE_TIMEOUT_MS=${RUNTRUE_AUTOSCALER_IDLE_TIMEOUT_MS:-30000}
 RUNTRUE_EDGE_HTTP_PORT=${RUNTRUE_EDGE_HTTP_PORT:-80}
 RUNTRUE_EDGE_HTTPS_PORT=${RUNTRUE_EDGE_HTTPS_PORT:-443}
 RUNTRUE_COMPOSE_PROJECT_NAME=${RUNTRUE_COMPOSE_PROJECT_NAME:-$(basename -- "$RUNTRUE_INSTALL_ROOT")}
+RUNTRUE_INSTALLATION_ID=${RUNTRUE_INSTALLATION_ID:-single-node}
+RUNTRUE_GITHUB_APP_CREDENTIAL_REFERENCE=${RUNTRUE_GITHUB_APP_CREDENTIAL_REFERENCE:-provider://github-app/production}
 RUNTRUE_ACTION_ADMISSION_CONTAINER=${RUNTRUE_ACTION_ADMISSION_CONTAINER:-${RUNTRUE_COMPOSE_PROJECT_NAME}-action-admission}
 RUNTRUE_REPOSITORY_ACTION_IMAGE_REPOSITORY=${RUNTRUE_REPOSITORY_ACTION_IMAGE_REPOSITORY:-runtrue.local/repository-actions}
 RUNTRUE_REPOSITORY_ACTION_BUILDX_BUILDER=${RUNTRUE_REPOSITORY_ACTION_BUILDX_BUILDER:-${RUNTRUE_COMPOSE_PROJECT_NAME}-repository-actions}
@@ -569,6 +594,8 @@ readonly RUNTRUE_RUNNER_RUNTIME_BUNDLE_IMAGE
 readonly RUNTRUE_ALLOW_CREDENTIAL_TAINTED_LOGS
 readonly RUNTRUE_EDGE_HTTP_PORT RUNTRUE_EDGE_HTTPS_PORT
 readonly RUNTRUE_COMPOSE_PROJECT_NAME
+readonly RUNTRUE_INSTALLATION_ID
+readonly RUNTRUE_GITHUB_APP_CREDENTIAL_REFERENCE
 readonly RUNTRUE_ACTION_ADMISSION_CONTAINER
 readonly RUNTRUE_REPOSITORY_ACTION_IMAGE_REPOSITORY RUNTRUE_REPOSITORY_ACTION_BUILDX_BUILDER
 readonly RUNTRUE_REPOSITORY_ACTION_ALLOWED_BASE_IMAGES
@@ -596,6 +623,8 @@ fi
 [[ "$RUNTRUE_GITHUB_OAUTH_CLIENT_ID" =~ ^[A-Za-z0-9._-]+$ ]] || die 'RUNTRUE_GITHUB_OAUTH_CLIENT_ID is invalid'
 [[ "$RUNTRUE_GITHUB_OAUTH_ADMIN_USER_IDS" =~ ^[1-9][0-9]*(,[1-9][0-9]*)*$ ]] ||
   die 'RUNTRUE_GITHUB_OAUTH_ADMIN_USER_IDS must be a comma-separated numeric list'
+[[ "$RUNTRUE_GITHUB_APP_CREDENTIAL_REFERENCE" =~ ^provider://github-app/[A-Za-z0-9_.-]+$ ]] ||
+  die 'RUNTRUE_GITHUB_APP_CREDENTIAL_REFERENCE is invalid'
 [[ "$RUNTRUE_RUNTIME_UID" =~ ^[1-9][0-9]*$ && "$RUNTRUE_RUNTIME_GID" =~ ^[1-9][0-9]*$ ]] ||
   die 'runtime uid and gid must be positive numbers'
 [[ "$RUNTRUE_DOCKER_GID" =~ ^[0-9]+$ ]] || die 'RUNTRUE_DOCKER_GID must be numeric'
@@ -629,6 +658,8 @@ fi
   die 'RUNTRUE_AUTOSCALER_IDLE_TIMEOUT_MS must be positive'
 [[ "$RUNTRUE_COMPOSE_PROJECT_NAME" =~ ^[a-z0-9][a-z0-9_-]*$ ]] ||
   die 'RUNTRUE_COMPOSE_PROJECT_NAME must contain only lowercase letters, digits, hyphens, and underscores'
+[[ "$RUNTRUE_INSTALLATION_ID" =~ ^[A-Za-z0-9_.-]+$ ]] ||
+  die 'RUNTRUE_INSTALLATION_ID is invalid'
 [[ "$RUNTRUE_ACTION_ADMISSION_CONTAINER" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]+$ ]] ||
   die 'RUNTRUE_ACTION_ADMISSION_CONTAINER is invalid'
 [[ "$RUNTRUE_REPOSITORY_ACTION_IMAGE_REPOSITORY" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]+$ ]] ||

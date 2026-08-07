@@ -198,7 +198,7 @@ services:
       RUNTRUE_DATABASE: /var/lib/runtrue/server/control-plane.sqlite
       RUNTRUE_DATA_ROOT: /var/lib/runtrue/server/blobs
       RUNTRUE_GIT_MIRROR_ROOT: /var/lib/runtrue/server/git-mirrors
-      RUNTRUE_INSTALLATION_ID: single-node
+      RUNTRUE_INSTALLATION_ID: "${RUNTRUE_INSTALLATION_ID:?set RUNTRUE_INSTALLATION_ID}"
       RUNTRUE_BOOTSTRAP_TOKEN_FILE: /run/runtrue-secrets/bootstrap.token
       RUNTRUE_SECURITY_KEY_FILE: /run/runtrue-keys/security.key
       RUNTRUE_BROWSER_COOKIE_SEALING_KEY_FILE: /run/runtrue-secrets/browser-cookie.key

@@ -31,6 +31,7 @@ RUNTRUE_DOCKER_GID=999
 RUNTRUE_DOCKER_BINARY=/usr/bin/docker
 RUNTRUE_DOCKER_BUILDX_PLUGIN=/usr/libexec/docker/cli-plugins/docker-buildx
 RUNTRUE_COMPOSE_PROJECT_NAME=runtrue-test
+RUNTRUE_INSTALLATION_ID=single-node
 COMPOSE_PROFILES=
 RUNTRUE_STATE_DIR=${temporary}/state
 RUNTRUE_PUBLIC_ORIGIN=https://runtrue.example.test
