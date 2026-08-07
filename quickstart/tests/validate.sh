@@ -53,7 +53,7 @@ RUNTRUE_GITHUB_APP_ID=42
 RUNTRUE_GITHUB_APP_SLUG=runtrue-test
 RUNTRUE_GITHUB_OAUTH_CLIENT_ID=test-client
 RUNTRUE_GITHUB_OAUTH_ADMIN_USER_IDS=42
-RUNTRUE_AUTOSCALER_IMAGE=ghcr.io/runtrue/github-actions-server:quickstart-autoscaler-latest
+RUNTRUE_AUTOSCALER_IMAGE=ghcr.io/runtrue/runtrue-autoscaler:latest
 RUNTRUE_AUTOSCALER_POOL_ID=pool-quickstart
 RUNTRUE_AUTOSCALER_CLAIM_ROOT=/var/lib/runtrue-autoscaler/runtrue-test/claims
 RUNTRUE_RUNNER_IMAGE=ghcr.io/runtrue/runtrue-runner@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
@@ -89,6 +89,9 @@ required = {
 missing = sorted(required - services.keys())
 if missing:
     raise SystemExit(f"quickstart compose is missing services: {', '.join(missing)}")
+
+if services["autoscaler"].get("image") != "ghcr.io/runtrue/runtrue-autoscaler:latest":
+    raise SystemExit("quickstart does not use the current Runtrue autoscaler release")
 
 server = services["server"]
 environment = server["environment"]
