@@ -41,6 +41,13 @@ name) are rejected and require an explicit migration. The project name is
 derived from the install root, preventing multiple installations on one host
 from colliding.
 
+Quick-start enables complete action logs by default, including jobs that receive
+credentials. This is useful for self-hosted debugging but means a trusted action
+can print a credential into the Runtrue log store. Set
+`RUNTRUE_ALLOW_CREDENTIAL_TAINTED_LOGS=false` to restore fail-closed log
+suppression. Published tainted frames are labeled
+`credential_taint_unredacted_operator_opt_in` in the control plane.
+
 If an interrupted earlier run left the public runner runtime bundle incomplete,
 the installer prepares and validates a complete replacement before publishing
 it. An existing valid private Wasm runtime key is preserved, and the incomplete
