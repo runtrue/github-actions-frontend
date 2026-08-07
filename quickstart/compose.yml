@@ -335,7 +335,7 @@ services:
           - "${RUNTRUE_EDGE_UPSTREAM_NAME:?run quick-start.sh first}"
 
   autoscaler:
-    image: "${RUNTRUE_AUTOSCALER_IMAGE:-ghcr.io/runtrue/github-actions-server:quickstart-autoscaler-latest}"
+    image: "${RUNTRUE_AUTOSCALER_IMAGE:-ghcr.io/runtrue/runtrue-autoscaler:latest}"
     pull_policy: always
     user: "${RUNTRUE_RUNTIME_UID:?run quick-start.sh first}:${RUNTRUE_RUNTIME_GID:?run quick-start.sh first}"
     group_add:
