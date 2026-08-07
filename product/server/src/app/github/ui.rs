@@ -14,8 +14,8 @@ use crate::github_install_ui::{
     GitHubInstallationState as UiGitHubInstallationState, GitHubInstallationView,
     GitHubInstallationsPage, GitHubPermission as UiGitHubPermission,
     GitHubRepositoryCandidateAction, GitHubRepositoryEventView, GitHubRepositoryLinkView,
-    GitHubUiAlert, RepositoryLinkState, RepositorySelection, RepositoryVisibility,
-    GITHUB_BROWSER_API_CACHE_CONTROL,
+    GitHubUiAlert, GitHubWorkflowPlanView, RepositoryLinkState, RepositorySelection,
+    RepositoryVisibility, GITHUB_BROWSER_API_CACHE_CONTROL,
 };
 use crate::human_oidc::{GitHubUserCatalog, GitHubUserInstallation, HumanOidcError};
 use crate::scm_worker::{
@@ -32,8 +32,9 @@ use axum::Json;
 use runtrue_auth::AuthContext;
 use runtrue_control_plane::{
     ConfigurationProjectTargetKind, ControlPlaneError, DurableEventRecord, DurableEventSource,
-    DurableTaskStatus, GitHubAccountKind, GitHubRepositorySelection, LinkSelectedGitHubRepository,
-    RepositoryRecord, SecretMetadataReference,
+    DurableTask, DurableTaskStatus, GitHubAccountKind, GitHubRepositorySelection,
+    LinkSelectedGitHubRepository, RepositoryRecord, ScmPendingExecutionState,
+    ScmWebhookEventRecord, SecretMetadataReference,
 };
 use runtrue_model::ContentDigest;
 use runtrue_policy::{
@@ -55,6 +56,96 @@ const BROWSER_RUN_LOG_FRAME_LIMIT: usize = 1_000;
 const BROWSER_RUN_LOG_BYTE_LIMIT: usize = 2 * 1024 * 1024;
 const BROWSER_PENDING_APPROVAL_LIMIT: usize = 100;
 const BROWSER_RESOLVED_APPROVAL_LIMIT: usize = 100;
+const BROWSER_EVENT_WORKFLOW_TASK_LIMIT: usize = 256;
+
+async fn github_event_workflow_plan(
+    state: &AppState,
+    event: &ScmWebhookEventRecord,
+    parent: &DurableTask,
+) -> Result<GitHubWorkflowPlanView, ControlPlaneError> {
+    let batch = state
+        .store
+        .tasks_by_kind_and_creation(
+            &parent.kind,
+            parent.created_unix_ms,
+            BROWSER_EVENT_WORKFLOW_TASK_LIMIT,
+        )
+        .await?;
+    let normalized_digest = event.normalized_digest.as_str();
+    let children = batch
+        .into_iter()
+        .filter(|task| {
+            task.payload
+                .get("workflow_path")
+                .and_then(Value::as_str)
+                .is_some()
+                && task
+                    .payload
+                    .pointer("/event/normalized_digest")
+                    .and_then(Value::as_str)
+                    == Some(normalized_digest)
+        })
+        .collect::<Vec<_>>();
+    if children.is_empty()
+        && matches!(
+            parent.status,
+            DurableTaskStatus::Pending | DurableTaskStatus::Claimed
+        )
+    {
+        return Ok(GitHubWorkflowPlanView::default());
+    }
+    let tasks = if children.is_empty() {
+        vec![parent.clone()]
+    } else {
+        children
+    };
+    let mut plan = GitHubWorkflowPlanView {
+        total: tasks.len(),
+        ..GitHubWorkflowPlanView::default()
+    };
+    for task in tasks {
+        match task.status {
+            DurableTaskStatus::Pending | DurableTaskStatus::Claimed => plan.preparing += 1,
+            DurableTaskStatus::Failed => plan.failed += 1,
+            DurableTaskStatus::Completed => {
+                let Some(completion) = state.store.scm_task_completion(&task.id).await? else {
+                    plan.skipped += 1;
+                    continue;
+                };
+                let mut awaiting_approval = false;
+                let mut continuation_failed = false;
+                let mut continuation_created_run = false;
+                for pending_id in &completion.pending_execution_ids {
+                    let pending = state.store.scm_pending_execution(pending_id).await?;
+                    match pending.state {
+                        ScmPendingExecutionState::AwaitingApproval
+                        | ScmPendingExecutionState::ContinuationPending => {
+                            awaiting_approval = true;
+                        }
+                        ScmPendingExecutionState::RunCreated => {
+                            continuation_created_run = true;
+                        }
+                        ScmPendingExecutionState::Denied
+                        | ScmPendingExecutionState::Expired
+                        | ScmPendingExecutionState::Stale => {
+                            continuation_failed = true;
+                        }
+                    }
+                }
+                if awaiting_approval {
+                    plan.awaiting_approval += 1;
+                } else if !completion.run_ids.is_empty() || continuation_created_run {
+                    plan.run_created += 1;
+                } else if continuation_failed {
+                    plan.failed += 1;
+                } else {
+                    plan.skipped += 1;
+                }
+            }
+        }
+    }
+    Ok(plan)
+}
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -2705,7 +2796,7 @@ async fn github_browser_state_response(
                 let digest = ContentDigest::sha256(event.delivery_id.as_bytes());
                 let suffix = digest.as_str().trim_start_matches("sha256:");
                 let durable_event_id = format!("event-scm-github-{suffix}");
-                let (event_action, processing_status, processing_detail) =
+                let (event_action, processing_status, processing_detail, workflow_plan) =
                     match state.store.event(&durable_event_id).await {
                         Ok(durable) => {
                             let action = durable
@@ -2713,7 +2804,11 @@ async fn github_browser_state_response(
                                 .pointer("/event_type/action")
                                 .and_then(Value::as_str)
                                 .map(str::to_owned);
-                            let (status, detail) = match state.store.task(&durable.task_id).await {
+                            let (status, detail, workflow_plan) = match state
+                                .store
+                                .task(&durable.task_id)
+                                .await
+                            {
                                 Ok(task) => {
                                     let status = match task.status {
                                         DurableTaskStatus::Pending => "pending",
@@ -2721,13 +2816,27 @@ async fn github_browser_state_response(
                                         DurableTaskStatus::Completed => "completed",
                                         DurableTaskStatus::Failed => "failed",
                                     };
-                                    (status, task.last_error)
+                                    let workflow_plan =
+                                        match github_event_workflow_plan(&state, &event, &task)
+                                            .await
+                                        {
+                                            Ok(plan) => plan,
+                                            Err(error) => {
+                                                return control_plane_problem(&request_id, error)
+                                            }
+                                        };
+                                    (status, task.last_error, workflow_plan)
                                 }
-                                Err(_) => ("received", None),
+                                Err(_) => ("received", None, GitHubWorkflowPlanView::default()),
                             };
-                            (action, status.to_owned(), detail)
+                            (action, status.to_owned(), detail, workflow_plan)
                         }
-                        Err(_) => (None, "received".to_owned(), None),
+                        Err(_) => (
+                            None,
+                            "received".to_owned(),
+                            None,
+                            GitHubWorkflowPlanView::default(),
+                        ),
                     };
                 events.push(GitHubRepositoryEventView {
                     delivery_id: event.delivery_id,
@@ -2738,6 +2847,7 @@ async fn github_browser_state_response(
                     event_action,
                     processing_status,
                     processing_detail,
+                    workflow_plan,
                     actor_login: event.actor_login,
                     ref_name: event.ref_name,
                     received_at: match timestamp(event.received_unix_ms) {

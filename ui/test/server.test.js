@@ -224,12 +224,15 @@ test("repository events keep source metadata grouped and columns aligned", async
   assert.match(html, /Verified webhook deliveries and their processing outcomes\./);
   assert.match(script, /class="repository-event-source"/);
   assert.match(script, /function runsForEvent\(event, runs\)/);
-  assert.match(script, /`\$\{runs\.length\} \$\{runs\.length === 1 \? "run" : "runs"\} created`/);
-  assert.match(script, /case "completed":\s*return \{ status: "warning", label: "No workflow run", detail: "No workflow matched, or workflow preparation was rejected" \}/);
+  assert.match(script, /const plan = event\.workflowPlan \|\| \{\}/);
+  assert.match(script, /label: "Evaluating workflows"/);
+  assert.match(script, /label: countLabel\(total, "workflow evaluated", "workflows evaluated"\)/);
+  assert.match(script, /case "completed":\s*return \{ status: "neutral", label: "No matching workflows", detail: "No workflow trigger matched this event" \}/);
   assert.match(script, /event\.processingDetail \|\| "Handler failed before creating a run"/);
-  assert.match(script, /case "processing":\s*return \{ status: "processing", label: "Processing", detail: "Handler in progress" \}/);
+  assert.match(script, /case "processing":\s*return \{ status: "processing", label: "Discovering workflows", detail: "Loading workflow definitions" \}/);
   assert.match(script, /default:\s*return \{ status: "received", label: "Received", detail: "No handler scheduled" \}/);
   assert.doesNotMatch(script, /No run created yet/);
+  assert.doesNotMatch(script, /No workflow matched, or workflow preparation was rejected/);
   assert.match(styles, /\.repository-event-source \{[^}]*display: grid;[^}]*gap: var\(--space-1\);/);
   assert.match(styles, /\.repository-event-table th:last-child,[^}]*text-align: right;/s);
   assert.doesNotMatch(styles, /var\(--space-7\)/);

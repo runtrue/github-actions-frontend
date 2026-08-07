@@ -11,7 +11,8 @@ pub use model::{
     ComponentHealth, GitHubAccountKind, GitHubAppHealth, GitHubInstallAction,
     GitHubInstallationState, GitHubInstallationView, GitHubInstallationsPage, GitHubPermission,
     GitHubRepositoryCandidateAction, GitHubRepositoryEventView, GitHubRepositoryLinkView,
-    GitHubUiAlert, RepositoryLinkState, RepositorySelection, RepositoryVisibility,
+    GitHubUiAlert, GitHubWorkflowPlanView, RepositoryLinkState, RepositorySelection,
+    RepositoryVisibility,
 };
 pub use payload::github_installations_payload;
 pub(crate) use payload::repository_url;
@@ -78,6 +79,7 @@ mod tests {
                 event_action: None,
                 processing_status: "pending".to_owned(),
                 processing_detail: None,
+                workflow_plan: GitHubWorkflowPlanView::default(),
                 actor_login: "ada".to_owned(),
                 ref_name: Some("refs/heads/main".to_owned()),
                 received_at: "2026-07-13T00:00:00Z".to_owned(),
@@ -121,6 +123,7 @@ mod tests {
             payload["github"]["events"][0]["processingStatus"],
             "pending"
         );
+        assert_eq!(payload["github"]["events"][0]["workflowPlan"]["total"], 0);
         assert!(payload.get("runs").is_none());
         assert!(payload.get("approvals").is_none());
         assert!(payload.get("runners").is_none());

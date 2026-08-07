@@ -170,7 +170,14 @@ RUNTRUE_AUTOSCALER_MINIMUM_IDLE_WORKERS=1
 Both settings default to zero and must not exceed
 `RUNTRUE_AUTOSCALER_MAXIMUM_WORKERS`. When either minimum is nonzero, the
 installer automatically binds warm workers to Quickstart's admitted baseline
-runtime compatibility digest.
+runtime compatibility digest. `RUNTRUE_AUTOSCALER_SCALE_UP_BATCH` defaults to
+the maximum worker count, allowing queued demand to launch the required fleet
+in one reconciliation; set it lower only to deliberately ramp up gradually.
+
+Webhook and workflow preparation happens before autoscaled runners receive
+jobs. Quickstart processes four SCM tasks concurrently by default. For a busy
+installation, set `RUNTRUE_SCM_WORKERS` independently (between 1 and 32) in
+`quick-start.env`; for example, `RUNTRUE_SCM_WORKERS=10`.
 
 The installer pulls the runtime assets from the public
 `ghcr.io/runtrue/runtrue-runner:quickstart-runtime-bundle-latest` tag by

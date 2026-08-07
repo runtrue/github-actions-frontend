@@ -14,6 +14,8 @@ installer=$(<"${QUICKSTART_DIR}/quick-start.sh")
 for required in \
   RUNTRUE_DOCKERHUB_USERNAME \
   RUNTRUE_DOCKERHUB_TOKEN_SOURCE \
+  RUNTRUE_AUTOSCALER_SCALE_UP_BATCH \
+  '"scale_up_batch": int(scale_up_batch)' \
   'https://index.docker.io/v1/' \
   'repository-actions/builder/docker-config/config.json' \
   '.bundle-image-id' \
@@ -99,6 +101,8 @@ if environment.get("RUNTRUE_REPOSITORY_ACTION_BUILDER_SOCKET") != "/var/lib/runt
     raise SystemExit("server repository-action builder socket is not configured")
 if environment.get("RUNTRUE_REPOSITORY_ACTION_CONTEXT_ROOT") != "/var/lib/runtrue-action-builder/source":
     raise SystemExit("server repository-action context root is not configured")
+if environment.get("RUNTRUE_SCM_WORKERS") != "4":
+    raise SystemExit("server does not default to parallel SCM preparation")
 if "action-builder" not in server.get("depends_on", {}):
     raise SystemExit("server does not require the action builder to be healthy")
 
