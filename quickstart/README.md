@@ -172,6 +172,11 @@ Both settings default to zero and must not exceed
 installer automatically binds warm workers to Quickstart's admitted baseline
 runtime compatibility digest.
 
+Webhook and workflow preparation happens before autoscaled runners receive
+jobs. Quickstart processes four SCM tasks concurrently by default. For a busy
+installation, set `RUNTRUE_SCM_WORKERS` independently (between 1 and 32) in
+`quick-start.env`; for example, `RUNTRUE_SCM_WORKERS=10`.
+
 The installer pulls the runtime assets from the public
 `ghcr.io/runtrue/runtrue-runner:quickstart-runtime-bundle-latest` tag by
 default. The bundle provides the admitted Wasm artifacts and OCI runtime

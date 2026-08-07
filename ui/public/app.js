@@ -147,29 +147,49 @@
   }
 
   function repositoryEventPresentation(event, runs) {
-    if (runs.length) {
+    const plan = event.workflowPlan || {};
+    const total = Number(plan.total || 0);
+    if (total > 0) {
+      const preparing = Number(plan.preparing || 0);
+      const runCreated = Number(plan.runCreated || 0);
+      const awaitingApproval = Number(plan.awaitingApproval || 0);
+      const skipped = Number(plan.skipped || 0);
+      const failedPreparation = Number(plan.failed || 0);
       const statuses = runs.map((run) => String(run.status || "pending"));
-      const status = statuses.some((value) => tone(value) === "danger")
+      const executionStatus = !statuses.length
+        ? "neutral"
+        : statuses.some((value) => tone(value) === "danger")
         ? "failed"
         : statuses.some((value) => tone(value) === "running")
           ? "running"
           : statuses.every((value) => tone(value) === "success") ? "succeeded" : "pending";
-      const succeeded = statuses.filter((value) => tone(value) === "success").length;
-      const failed = statuses.filter((value) => tone(value) === "danger").length;
-      const summary = [succeeded ? `${succeeded} succeeded` : "", failed ? `${failed} failed` : ""].filter(Boolean).join(" · ");
+      const countLabel = (count, singular, plural = `${singular}s`) => `${count} ${count === 1 ? singular : plural}`;
+      const summary = [
+        runCreated ? countLabel(runCreated, "runnable") : "",
+        awaitingApproval ? countLabel(awaitingApproval, "awaiting approval") : "",
+        skipped ? countLabel(skipped, "skipped") : "",
+        failedPreparation ? countLabel(failedPreparation, "failed") : "",
+      ].filter(Boolean).join(" · ");
+      if (preparing > 0) {
+        return {
+          status: failedPreparation ? "failed" : "processing",
+          label: "Evaluating workflows",
+          detail: `${total - preparing} of ${total} prepared${summary ? ` · ${summary}` : ""}`,
+        };
+      }
       return {
-        status,
-        label: `${runs.length} ${runs.length === 1 ? "run" : "runs"} created`,
-        detail: summary || "Execution pending",
+        status: failedPreparation ? "failed" : awaitingApproval ? "warning" : executionStatus,
+        label: countLabel(total, "workflow evaluated", "workflows evaluated"),
+        detail: summary || "No runnable jobs for this event",
       };
     }
     switch (String(event.processingStatus || "received").toLowerCase()) {
       case "pending":
-        return { status: "pending", label: "Pending", detail: "Waiting for handler" };
+        return { status: "pending", label: "Queued", detail: "Waiting to discover workflows" };
       case "processing":
-        return { status: "processing", label: "Processing", detail: "Handler in progress" };
+        return { status: "processing", label: "Discovering workflows", detail: "Loading workflow definitions" };
       case "completed":
-        return { status: "warning", label: "No workflow run", detail: "No workflow matched, or workflow preparation was rejected" };
+        return { status: "neutral", label: "No matching workflows", detail: "No workflow trigger matched this event" };
       case "failed":
         return { status: "failed", label: "Workflow preparation failed", detail: event.processingDetail || "Handler failed before creating a run" };
       default:

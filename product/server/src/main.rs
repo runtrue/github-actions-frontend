@@ -60,6 +60,8 @@ const MAX_RUNNER_TLS_FILE_BYTES: u64 = 1024 * 1024;
 const MAX_GITHUB_SIGNER_FRAME_BYTES: usize = 16 * 1024;
 const GITHUB_SIGNER_IO_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_DUE_SCHEDULES_PER_MAINTENANCE_TICK: usize = 100;
+const DEFAULT_SCM_WORKER_COUNT: usize = 4;
+const MAX_SCM_WORKER_COUNT: usize = 32;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -723,6 +725,8 @@ enum StartupError {
     InvalidRunnerProtocolMinimum,
     #[error("RUNTRUE_EMBEDDED_AUTOSCALER must be exactly `true` or `false`")]
     InvalidEmbeddedAutoscaler,
+    #[error("RUNTRUE_SCM_WORKERS must be an integer between 1 and 32")]
+    InvalidScmWorkerCount,
     #[error(
         "runner gRPC requires distinct control and enrollment listen addresses, server certificate/key, and installation CA certificate/key together"
     )]
@@ -965,6 +969,7 @@ async fn main() {
 
 async fn run() -> Result<(), Box<dyn Error + Send + Sync>> {
     let config = Config::load(Args::parse())?;
+    let scm_worker_count = scm_worker_count_from_env()?;
     let scm_workflow_directory = env::var("RUNTRUE_SCM_WORKFLOW_DIRECTORY")
         .unwrap_or_else(|_| DEFAULT_SCM_WORKFLOW_DIRECTORY.to_owned());
     let listen = config.listen;
@@ -1181,14 +1186,21 @@ async fn run() -> Result<(), Box<dyn Error + Send + Sync>> {
     drop(config);
 
     let stop_worker = Arc::new(AtomicBool::new(false));
-    let worker_thread = worker
+    let worker_threads = worker
         .map(|worker| {
-            let stop = Arc::clone(&stop_worker);
-            std::thread::Builder::new()
-                .name("runtrue-scm-worker".to_owned())
-                .spawn(move || run_scm_worker(worker, &stop))
+            (0..scm_worker_count)
+                .map(|slot| {
+                    let slot_worker = worker.clone_for_slot(slot)?;
+                    let stop = Arc::clone(&stop_worker);
+                    std::thread::Builder::new()
+                        .name(format!("runtrue-scm-worker-{slot}"))
+                        .spawn(move || run_scm_worker(slot_worker, &stop))
+                        .map_err(Into::into)
+                })
+                .collect::<Result<Vec<_>, Box<dyn Error + Send + Sync>>>()
         })
-        .transpose()?;
+        .transpose()?
+        .unwrap_or_default();
     let server_result = serve_servers(
         listen,
         state,
@@ -1197,13 +1209,29 @@ async fn run() -> Result<(), Box<dyn Error + Send + Sync>> {
         Arc::clone(&stop_worker),
     )
     .await;
-    if let Some(worker_thread) = worker_thread {
+    for worker_thread in worker_threads {
         worker_thread
             .join()
             .map_err(|_| io::Error::other("SCM worker thread panicked during shutdown"))?;
     }
     server_result?;
     Ok(())
+}
+
+fn scm_worker_count_from_env() -> Result<usize, StartupError> {
+    match env::var("RUNTRUE_SCM_WORKERS") {
+        Ok(value) => parse_scm_worker_count(&value),
+        Err(env::VarError::NotPresent) => Ok(DEFAULT_SCM_WORKER_COUNT),
+        Err(env::VarError::NotUnicode(_)) => Err(StartupError::InvalidScmWorkerCount),
+    }
+}
+
+fn parse_scm_worker_count(value: &str) -> Result<usize, StartupError> {
+    value
+        .parse::<usize>()
+        .ok()
+        .filter(|count| (1..=MAX_SCM_WORKER_COUNT).contains(count))
+        .ok_or(StartupError::InvalidScmWorkerCount)
 }
 
 struct RunnerGrpcRuntime {
@@ -1877,6 +1905,19 @@ mod tests {
         assert!(!default.embedded_autoscaler);
         let embedded = Args::try_parse_from(["runtrue-server", "--embedded-autoscaler"]).unwrap();
         assert!(embedded.embedded_autoscaler);
+    }
+
+    #[test]
+    fn scm_worker_count_is_bounded_and_defaults_to_parallel_preparation() {
+        assert_eq!(DEFAULT_SCM_WORKER_COUNT, 4);
+        assert_eq!(parse_scm_worker_count("1").unwrap(), 1);
+        assert_eq!(parse_scm_worker_count("32").unwrap(), 32);
+        for invalid in ["", "0", "33", "four", " 4"] {
+            assert!(matches!(
+                parse_scm_worker_count(invalid),
+                Err(StartupError::InvalidScmWorkerCount)
+            ));
+        }
     }
 
     #[test]

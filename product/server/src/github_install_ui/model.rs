@@ -285,9 +285,20 @@ pub struct GitHubRepositoryEventView {
     pub event_action: Option<String>,
     pub processing_status: String,
     pub processing_detail: Option<String>,
+    pub workflow_plan: GitHubWorkflowPlanView,
     pub actor_login: String,
     pub ref_name: Option<String>,
     pub received_at: String,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct GitHubWorkflowPlanView {
+    pub total: usize,
+    pub preparing: usize,
+    pub run_created: usize,
+    pub awaiting_approval: usize,
+    pub skipped: usize,
+    pub failed: usize,
 }
 
 /// Fixed, redaction-safe message shown at the top of the page.

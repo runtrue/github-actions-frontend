@@ -2219,6 +2219,15 @@ impl ScmTaskWorker {
         self.config.poll_interval
     }
 
+    /// Clone this worker for one bounded concurrent processing slot. Slots
+    /// share thread-safe providers and metrics but use distinct lease owners.
+    pub fn clone_for_slot(&self, slot: usize) -> Result<Self, ScmWorkerBuildError> {
+        let mut worker = self.clone();
+        worker.config.worker_id = format!("{}-{slot}", self.config.worker_id);
+        validate_config(&worker.config)?;
+        Ok(worker)
+    }
+
     #[must_use]
     pub fn metrics(&self) -> ScmWorkerMetricsSnapshot {
         self.metrics.snapshot()
