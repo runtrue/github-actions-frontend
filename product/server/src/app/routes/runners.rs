@@ -24,6 +24,20 @@ use serde::{Deserialize, Serialize};
 
 const GENERIC_RUNTIME_COMPATIBILITY_DIGEST: &str =
     "sha256:e5b5fc9c576175a0bdacc09872fed2390332da870ce6140503664d07b88292ca";
+
+fn derived_template_suffix<'a>(
+    runtime_compatibility_digest: &ContentDigest,
+    provider_template_id: &'a str,
+) -> Option<&'a str> {
+    let (_, suffix) = provider_template_id.rsplit_once("--")?;
+    let digest_prefix = runtime_compatibility_digest
+        .as_str()
+        .strip_prefix("sha256:")?
+        .get(..16)?;
+    (suffix == digest_prefix && suffix.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .then_some(suffix)
+}
+
 #[derive(Serialize)]
 pub(in crate::app) struct Items<T> {
     pub(in crate::app) items: Vec<T>,
@@ -614,7 +628,7 @@ pub(in crate::app) async fn put_runner_fleet_configuration(
         enabled: body.enabled,
         updated_unix_ms: now,
     };
-    let templates = body
+    let mut templates: Vec<RunnerPoolTemplateRecord> = body
         .templates
         .into_iter()
         .map(|template| RunnerPoolTemplateRecord {
@@ -627,6 +641,42 @@ pub(in crate::app) async fn put_runner_fleet_configuration(
             updated_unix_ms: now,
         })
         .collect();
+    if let Some(generic) = templates
+        .iter()
+        .find(|template| {
+            template.runtime_compatibility_digest.as_str() == GENERIC_RUNTIME_COMPATIBILITY_DIGEST
+        })
+        .cloned()
+    {
+        let existing = match state.store.runner_pool_configuration(&pool_id).await {
+            Ok(configuration) => configuration,
+            Err(error) => return control_plane_problem(&request_id, error),
+        };
+        for template in existing.templates {
+            if template.provider != generic.provider
+                || templates.iter().any(|configured| {
+                    configured.runtime_compatibility_digest == template.runtime_compatibility_digest
+                })
+            {
+                continue;
+            }
+            let Some(suffix) = derived_template_suffix(
+                &template.runtime_compatibility_digest,
+                &template.provider_template_id,
+            ) else {
+                continue;
+            };
+            templates.push(RunnerPoolTemplateRecord {
+                pool_id: pool_id.clone(),
+                runtime_compatibility_digest: template.runtime_compatibility_digest,
+                provider: generic.provider.clone(),
+                provider_template_id: format!("{}--{suffix}", generic.provider_template_id),
+                runner_template_digest: generic.runner_template_digest.clone(),
+                created_unix_ms: template.created_unix_ms,
+                updated_unix_ms: now,
+            });
+        }
+    }
     match state
         .store
         .put_runner_pool_configuration(&runtrue_control_plane::RunnerPoolConfiguration {

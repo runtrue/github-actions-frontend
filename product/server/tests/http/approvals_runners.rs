@@ -465,6 +465,7 @@ async fn autoscaler_binds_a_generic_template_to_exact_demand() {
         .as_u64()
         .unwrap();
     let created = application
+        .clone()
         .oneshot(api_request(
             "POST",
             "/api/v1/runner-pools/pool-generic-http/fleet/requests",
@@ -488,4 +489,46 @@ async fn autoscaler_binds_a_generic_template_to_exact_demand() {
         .unwrap();
     assert_eq!(status, StatusCode::CREATED, "{created}; {templates:?}");
     assert_eq!(created["runtime_compatibility_digest"], exact.as_str());
+
+    let replacement_runner_template = ContentDigest::sha256(b"replacement-runner-template");
+    let reconfigured = application
+        .oneshot(api_request(
+            "PUT",
+            "/api/v1/runner-pools/pool-generic-http/fleet/configuration",
+            serde_json::to_vec(&json!({
+                "baseline_runtime_compatibility_digest": null,
+                "minimum_workers": 0,
+                "minimum_idle_workers": 0,
+                "maximum_workers": 1,
+                "scale_up_batch": 1,
+                "idle_timeout_ms": 60_000,
+                "offline_grace_ms": 60_000,
+                "cooldown_ms": 1_000,
+                "enabled": true,
+                "templates": [{
+                    "runtime_compatibility_digest": generic,
+                    "provider": "docker",
+                    "provider_template_id": "replacement-generic-docker",
+                    "runner_template_digest": replacement_runner_template,
+                }]
+            }))
+            .unwrap(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(reconfigured.status(), StatusCode::NO_CONTENT);
+    let exact_template = control_plane
+        .list_runner_pool_templates("pool-generic-http")
+        .unwrap()
+        .into_iter()
+        .find(|template| template.runtime_compatibility_digest == exact)
+        .unwrap();
+    assert_eq!(
+        exact_template.runner_template_digest,
+        replacement_runner_template
+    );
+    assert_eq!(
+        exact_template.provider_template_id,
+        "replacement-generic-docker--6e3ae4cd0d796985"
+    );
 }
