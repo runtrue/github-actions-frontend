@@ -15,6 +15,34 @@ use tonic::Status;
 const CONTROL_TRANSITION_POLL_INTERVAL: Duration = Duration::from_millis(5);
 
 impl RunnerControlService {
+    pub(in crate::runner_service) async fn await_session_lease_acceptance(
+        &self,
+        session: &RunnerSession,
+        execution_lease_id: &str,
+        fencing_generation: u64,
+    ) -> Result<(), Status> {
+        // A runner can send its acceptance on the control stream and begin a
+        // unary data-plane request on another HTTP/2 stream before the server
+        // has consumed the acceptance. Wait only while the exact offer still
+        // belongs to this session; every durable lease check remains in the
+        // caller after this in-memory transition completes.
+        let deadline = Instant::now() + self.inner.config.stream_send_timeout;
+        loop {
+            let offered = {
+                let state = session.state()?;
+                if state.accepted.get(execution_lease_id) == Some(&fencing_generation) {
+                    return Ok(());
+                }
+                state.offered.get(execution_lease_id) == Some(&fencing_generation)
+            };
+            if !offered || Instant::now() >= deadline {
+                break;
+            }
+            sleep(CONTROL_TRANSITION_POLL_INTERVAL).await;
+        }
+        require_session_lease(session, execution_lease_id, fencing_generation, true)
+    }
+
     async fn await_broker_session_state(
         &self,
         session: &RunnerSession,
