@@ -368,12 +368,12 @@ impl v2::runner_object_transfer_server::RunnerObjectTransfer for RunnerControlSe
         }
         let session = self.authenticated_session(&authenticated)?;
         require_session_protocol(&session, 2)?;
-        require_session_lease(
+        self.await_session_lease_acceptance(
             &session,
             &request.execution_lease_id,
             request.fencing_generation,
-            true,
-        )?;
+        )
+        .await?;
         let lease = self
             .bound_lease(
                 &authenticated.runner_id,

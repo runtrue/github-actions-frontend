@@ -1435,6 +1435,52 @@ async fn unary_calls_must_use_the_certificate_that_owns_the_open_session() {
 }
 
 #[tokio::test]
+async fn source_authorization_waits_for_the_control_stream_acceptance() {
+    let fixture = fixture();
+    let (outbound, _receiver) = mpsc::channel(2);
+    let session = Arc::new(RunnerSession {
+        runner_id: "runner-1".to_owned(),
+        connection_id: "source-acceptance-race".to_owned(),
+        protocol_version: PROTOCOL_MAX,
+        max_concurrent_wasm_jobs: 1,
+        posture_digest: fixture.posture_digest.clone(),
+        runner_image_digest: ContentDigest::sha256(b"test runner image"),
+        certificate_fingerprint: None,
+        certificate_expires_unix_ms: None,
+        outbound,
+        state: Mutex::new(SessionState {
+            offered: BTreeMap::from([(fixture.lease.id.clone(), fixture.lease.fencing_generation)]),
+            accepted: BTreeMap::new(),
+            cancellation_acks: BTreeSet::new(),
+            log_sequences: BTreeMap::new(),
+            running_steps: BTreeMap::new(),
+            terminal_steps: BTreeSet::new(),
+            scm_credential_leases: BTreeSet::new(),
+            current_attempts: BTreeMap::new(),
+            rotation_notice_sent: false,
+        }),
+        offer_lock: tokio::sync::Mutex::new(()),
+        broker_lock: tokio::sync::Mutex::new(()),
+    });
+    let transition = Arc::clone(&session);
+    let lease_id = fixture.lease.id.clone();
+    let generation = fixture.lease.fencing_generation;
+    let accept = tokio::spawn(async move {
+        tokio::task::yield_now().await;
+        let mut state = transition.state().expect("session state");
+        state.offered.remove(&lease_id);
+        state.accepted.insert(lease_id, generation);
+    });
+
+    fixture
+        .service
+        .await_session_lease_acceptance(&session, &fixture.lease.id, generation)
+        .await
+        .expect("acceptance transition");
+    accept.await.expect("acceptance task");
+}
+
+#[tokio::test]
 async fn secret_and_oidc_brokers_require_exact_live_step_and_are_one_use() {
     use x25519_dalek::{PublicKey, StaticSecret};
 
