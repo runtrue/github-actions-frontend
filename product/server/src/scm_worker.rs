@@ -754,10 +754,7 @@ where
                 InstallationTokenRequest {
                     installation_id,
                     repository_ids: vec![repository_id],
-                    permissions: std::collections::BTreeMap::from([
-                        (GitHubPermission::Metadata, GitHubPermissionLevel::Read),
-                        (GitHubPermission::PullRequests, GitHubPermissionLevel::Read),
-                    ]),
+                    permissions: github_repository_permission_lookup_permissions(),
                 },
                 now_unix_seconds,
             )
@@ -820,10 +817,7 @@ where
                 InstallationTokenRequest {
                     installation_id,
                     repository_ids: vec![repository_id],
-                    permissions: std::collections::BTreeMap::from([(
-                        GitHubPermission::Metadata,
-                        GitHubPermissionLevel::Read,
-                    )]),
+                    permissions: github_repository_permission_lookup_permissions(),
                 },
                 now_unix_seconds,
             )
@@ -1001,6 +995,14 @@ fn github_read_permissions(value: &serde_json::Value) -> bool {
             (GitHubPermission::Contents, GitHubPermissionLevel::Read),
         ]),
     )
+}
+
+fn github_repository_permission_lookup_permissions(
+) -> BTreeMap<GitHubPermission, GitHubPermissionLevel> {
+    BTreeMap::from([
+        (GitHubPermission::Metadata, GitHubPermissionLevel::Read),
+        (GitHubPermission::PullRequests, GitHubPermissionLevel::Read),
+    ])
 }
 
 fn github_check_permissions(value: &serde_json::Value) -> bool {
@@ -6434,6 +6436,13 @@ fn github_provider_ids_and_permissions_fail_closed() {
     for invalid in ["", "0", "installation-1", "-1", "42.0"] {
         assert!(parse_github_external_id(invalid).is_err(), "{invalid}");
     }
+    assert_eq!(
+        github_repository_permission_lookup_permissions(),
+        BTreeMap::from([
+            (GitHubPermission::Metadata, GitHubPermissionLevel::Read),
+            (GitHubPermission::PullRequests, GitHubPermissionLevel::Read),
+        ])
+    );
     assert!(github_read_permissions(&serde_json::json!({
         "metadata": "read",
         "contents": "write",
