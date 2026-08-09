@@ -72,6 +72,7 @@ const MAX_SCM_WORKFLOWS: usize = 64;
 const SCM_TASK_KIND: &str = SCM_EVENT_TASK_KIND;
 const SCM_CONTINUATION_TASK_KIND: &str = "scm.approval.continue";
 const SCM_CHECK_TASK_KIND: &str = "scm.check.publish";
+const GITHUB_REPOSITORY_WRITER_APPROVER: &str = "github-repository-writer";
 const DEFAULT_POLICY_VERSION: &str = "server-default-deny-v1";
 const MAX_COMPONENT_BYTES: usize = 255;
 const MAX_FAILURE_BYTES: usize = 1024;
@@ -2817,7 +2818,7 @@ impl ScmTaskWorker {
                 &idempotency_key,
                 approval_id,
                 ApprovalDecision {
-                    actor_id: "github-repository-writer".to_owned(),
+                    actor_id: GITHUB_REPOSITORY_WRITER_APPROVER.to_owned(),
                     decision,
                     reason: format!(
                         "GitHub user {} ({}) selected `{identifier}` on check run {}",
@@ -3619,7 +3620,7 @@ impl ScmTaskWorker {
                     ),
                     &approval.id,
                     ApprovalDecision {
-                        actor_id: format!("github:{}", event.actor.external_id),
+                        actor_id: GITHUB_REPOSITORY_WRITER_APPROVER.to_owned(),
                         decision: ApprovalDecisionKind::Approve,
                         reason: format!(
                             "Repository auto-approval after live GitHub write verification for @{}",
@@ -3825,7 +3826,7 @@ impl ScmTaskWorker {
                     eligible_approvers: BTreeSet::from([
                         "runtrue-workflow-approver".to_owned(),
                         "bootstrap".to_owned(),
-                        "github-repository-writer".to_owned(),
+                        GITHUB_REPOSITORY_WRITER_APPROVER.to_owned(),
                     ]),
                     forbidden_approvers: BTreeSet::new(),
                     one_shot: !reusable,
