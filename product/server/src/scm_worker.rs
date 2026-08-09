@@ -801,6 +801,9 @@ where
             || installation.credential_reference != self.credential_reference
             || !exact_github_repository_origin(&self.endpoints, repository, owner, name)
         {
+            eprintln!(
+                "GitHub repository writer verification rejected: installation or repository binding mismatch"
+            );
             return Err(ScmSourceFetchError::CredentialUnavailable);
         }
         let installation_id = parse_github_external_id(&installation.external_id)?;
@@ -821,7 +824,10 @@ where
                 },
                 now_unix_seconds,
             )
-            .map_err(classify_repository_credential_error)?;
+            .map_err(|error| {
+                eprintln!("GitHub repository writer verification token mint failed: {error}");
+                classify_repository_credential_error(error)
+            })?;
         broker
             .repository_permission_for_user(
                 &token,
@@ -831,10 +837,23 @@ where
                 actor_id,
                 actor_login,
             )
-            .map(|permission| permission.can_approve_workflow())
+            .map(|permission| {
+                let authorized = permission.can_approve_workflow();
+                if !authorized {
+                    eprintln!(
+                        "GitHub repository writer verification denied: actor does not have write permission"
+                    );
+                }
+                authorized
+            })
             .map_err(|error| match error {
                 GitHubError::Transport => ScmSourceFetchError::Unavailable,
-                _ => ScmSourceFetchError::Rejected,
+                _ => {
+                    eprintln!(
+                        "GitHub repository writer verification permission lookup failed: {error}"
+                    );
+                    ScmSourceFetchError::Rejected
+                }
             })
     }
 }
