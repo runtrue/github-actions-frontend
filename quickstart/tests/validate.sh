@@ -20,6 +20,8 @@ for required in \
   '"scale_up_batch": int(scale_up_batch)' \
   'https://index.docker.io/v1/' \
   'repository-actions/builder/docker-config/config.json' \
+  'remove_legacy_exited_autoscaled_runners' \
+  'label=dev.runtrue.installation=${RUNTRUE_COMPOSE_PROJECT_NAME}' \
   '.bundle-image-id' \
   'refreshing stale or incomplete runner runtime bundle'; do
   [[ "$installer" == *"$required"* ]] || {

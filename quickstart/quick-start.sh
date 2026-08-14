@@ -270,6 +270,23 @@ recycle_autoscaled_runners_for_repository_action_trust() {
   fi
 }
 
+remove_legacy_exited_autoscaled_runners() {
+  local container_id removed=0 status
+  for status in exited dead; do
+    while IFS= read -r container_id; do
+      [[ -n "$container_id" ]] || continue
+      docker rm "$container_id" >/dev/null
+      ((removed += 1))
+    done < <(docker ps -aq \
+      --filter "label=dev.runtrue.autoscaled=true" \
+      --filter "label=dev.runtrue.installation=${RUNTRUE_COMPOSE_PROJECT_NAME}" \
+      --filter "status=${status}")
+  done
+  if ((removed > 0)); then
+    printf 'quick-start: removed %s legacy exited autoscaled runner(s)\n' "$removed"
+  fi
+}
+
 clear_stale_oci_runroot() {
   local runroot="${RUNTRUE_STATE_DIR}/autoscaler/runtime-assets/oci/image-store/.runtrue-runroot"
   [[ -e "$runroot" || -L "$runroot" ]] || return 0
@@ -851,6 +868,7 @@ if [[ -e "${RUNTRUE_STATE_DIR}/autoscaler/runtime-assets/oci/image-store/.runtru
   stale_oci_runroot=true
 fi
 "${compose[@]}" stop autoscaler action-builder action-admission >/dev/null 2>&1 || true
+remove_legacy_exited_autoscaled_runners
 recycle_autoscaled_runners_for_repository_action_trust "$stale_oci_runroot"
 clear_stale_oci_runroot
 "${compose[@]}" up -d --wait --pull always "${base_services[@]}"
