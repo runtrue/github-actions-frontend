@@ -11,6 +11,7 @@ bash -n "${QUICKSTART_DIR}/bootstrap-state.sh"
 bash -n "${QUICKSTART_DIR}/traefik-entrypoint.sh"
 
 installer=$(<"${QUICKSTART_DIR}/quick-start.sh")
+bootstrap=$(<"${QUICKSTART_DIR}/bootstrap-state.sh")
 for required in \
   RUNTRUE_DOCKERHUB_USERNAME \
   RUNTRUE_DOCKERHUB_TOKEN_SOURCE \
@@ -29,6 +30,69 @@ for required in \
     exit 1
   }
 done
+
+for required in \
+  'RUNNER_SERVER_CERTIFICATE_DAYS=365' \
+  'RUNNER_SERVER_CERTIFICATE_RENEWAL_SECONDS=' \
+  'issue_runner_server_certificate' \
+  'renewed runner server certificate before expiry'; do
+  [[ "$bootstrap" == *"$required"* ]] || {
+    printf 'quickstart state bootstrap is missing runner TLS renewal support: %s\n' "$required" >&2
+    exit 1
+  }
+done
+
+bootstrap_state="${temporary}/bootstrap-state"
+bootstrap_uid=$(id -u)
+bootstrap_gid=$(id -g)
+if [[ "$bootstrap_uid" == 0 ]]; then
+  bootstrap_uid=10001
+  bootstrap_gid=10001
+fi
+RUNTRUE_RUNTIME_UID=$bootstrap_uid RUNTRUE_RUNTIME_GID=$bootstrap_gid \
+  "${QUICKSTART_DIR}/bootstrap-state.sh" --state-dir "$bootstrap_state" >/dev/null
+runner_ca_before=$(sha256sum "${bootstrap_state}/tls/runner-ca.pem")
+runner_server_before=$(openssl x509 -in "${bootstrap_state}/tls/runner-server.pem" -noout -serial)
+openssl req -new -key "${bootstrap_state}/tls/runner-server.key" \
+  -out "${temporary}/expiring-runner-server.csr" -subj '/CN=server' \
+  -addext 'subjectAltName=DNS:server,DNS:localhost,IP:127.0.0.1' 2>/dev/null
+cat >"${temporary}/runner-server.ext" <<'EOF'
+basicConstraints=critical,CA:FALSE
+keyUsage=critical,digitalSignature
+extendedKeyUsage=serverAuth
+subjectAltName=DNS:server,DNS:localhost,IP:127.0.0.1
+EOF
+runner_server_serial=$(openssl rand -hex 16)
+openssl x509 -req -in "${temporary}/expiring-runner-server.csr" \
+  -CA "${bootstrap_state}/tls/runner-ca.pem" \
+  -CAkey "${bootstrap_state}/tls/runner-ca.key" \
+  -set_serial "0x${runner_server_serial}" -days 1 \
+  -extfile "${temporary}/runner-server.ext" \
+  -out "${temporary}/expiring-runner-server.pem" 2>/dev/null
+install -m 0600 "${temporary}/expiring-runner-server.pem" \
+  "${bootstrap_state}/tls/runner-server.pem"
+if [[ "$(id -u)" == 0 ]]; then
+  chown "${bootstrap_uid}:${bootstrap_gid}" "${bootstrap_state}/tls/runner-server.pem"
+fi
+renewal_output=$(RUNTRUE_RUNTIME_UID=$bootstrap_uid RUNTRUE_RUNTIME_GID=$bootstrap_gid \
+  "${QUICKSTART_DIR}/bootstrap-state.sh" --state-dir "$bootstrap_state")
+[[ "$renewal_output" == *'renewed runner server certificate before expiry'* ]] || {
+  printf 'quickstart did not report renewal of an expiring runner server certificate\n' >&2
+  exit 1
+}
+[[ "$(sha256sum "${bootstrap_state}/tls/runner-ca.pem")" == "$runner_ca_before" ]] || {
+  printf 'quickstart replaced the stable runner CA during server certificate renewal\n' >&2
+  exit 1
+}
+[[ "$(openssl x509 -in "${bootstrap_state}/tls/runner-server.pem" -noout -serial)" != "$runner_server_before" ]] || {
+  printf 'quickstart did not replace the expiring runner server certificate\n' >&2
+  exit 1
+}
+openssl x509 -in "${bootstrap_state}/tls/runner-server.pem" \
+  -checkend $((300 * 24 * 60 * 60)) -noout >/dev/null || {
+  printf 'renewed runner server certificate is not valid for at least 300 days\n' >&2
+  exit 1
+}
 
 cat >"${temporary}/runtime.env" <<EOF
 RUNTRUE_RUNTIME_UID=10001

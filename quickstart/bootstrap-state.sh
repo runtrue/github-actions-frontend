@@ -9,6 +9,8 @@ STATE_DIR=
 WITH_TRAEFIK=false
 CHECK_ONLY=false
 TEMP_PATHS=()
+readonly RUNNER_SERVER_CERTIFICATE_DAYS=365
+readonly RUNNER_SERVER_CERTIFICATE_RENEWAL_SECONDS=$((30 * 24 * 60 * 60))
 
 die() {
   printf 'bootstrap: %s\n' "$*" >&2
@@ -185,6 +187,8 @@ validate_tls_material() {
   openssl x509 -in "${directory}/runner-server.pem" -noout >/dev/null 2>&1 || die 'runner server certificate is invalid'
   openssl x509 -in "${directory}/runner-ca.pem" -noout -text 2>/dev/null |
     grep -q 'CA:TRUE' || die 'runner CA certificate lacks CA constraints'
+  openssl x509 -in "${directory}/runner-server.pem" \
+    -checkend 0 -noout >/dev/null 2>&1 || die 'runner server certificate has expired'
   openssl verify -CAfile "${directory}/runner-ca.pem" "${directory}/runner-server.pem" >/dev/null 2>&1 ||
     die 'runner server certificate does not verify under the runner CA'
   openssl x509 -in "${directory}/runner-server.pem" -checkhost server -noout >/dev/null 2>&1 ||
@@ -198,28 +202,15 @@ validate_tls_material() {
   rm -f -- "$public_key" "$certificate_key"
 }
 
-create_tls_material() {
-  local directory="${STATE_DIR}/tls" temporary serial name present=0
-  local -a names=(runner-ca.key runner-ca.pem runner-server.key runner-server.pem)
-  for name in "${names[@]}"; do
-    [[ -e "${directory}/${name}" || -L "${directory}/${name}" ]] && ((present += 1))
-  done
-  if ((present == ${#names[@]})); then
-    validate_tls_material
-    return
-  fi
-  ((present == 0)) || die 'partial runner TLS state found; refusing to replace credentials'
-  temporary=$(mktemp -d -- "${directory}/.bootstrap-tls.XXXXXXXX")
+issue_runner_server_certificate() {
+  local directory=$1 destination=$2 temporary serial
+  temporary=$(mktemp -d -- "${directory}/.runner-server-certificate.XXXXXXXX")
   TEMP_PATHS+=("$temporary")
   chmod 0700 -- "$temporary"
-  openssl genpkey -algorithm ED25519 -out "${temporary}/runner-ca.key" 2>/dev/null
-  openssl req -new -x509 -key "${temporary}/runner-ca.key" \
-    -out "${temporary}/runner-ca.pem" -days 3650 \
-    -subj '/CN=Runtrue local evaluation runner CA' \
-    -addext 'basicConstraints=critical,CA:TRUE,pathlen:0' \
-    -addext 'keyUsage=critical,keyCertSign,cRLSign' 2>/dev/null
-  openssl genpkey -algorithm ED25519 -out "${temporary}/runner-server.key" 2>/dev/null
-  openssl req -new -key "${temporary}/runner-server.key" \
+  openssl x509 -in "${directory}/runner-ca.pem" \
+    -checkend $(((RUNNER_SERVER_CERTIFICATE_DAYS + 1) * 24 * 60 * 60)) -noout \
+    >/dev/null 2>&1 || die 'runner CA expires too soon to renew the runner server certificate'
+  openssl req -new -key "${directory}/runner-server.key" \
     -out "${temporary}/runner-server.csr" -subj '/CN=server' \
     -addext 'subjectAltName=DNS:server,DNS:localhost,IP:127.0.0.1' 2>/dev/null
   cat >"${temporary}/server.ext" <<'EOF'
@@ -230,9 +221,43 @@ subjectAltName=DNS:server,DNS:localhost,IP:127.0.0.1
 EOF
   serial=$(openssl rand -hex 16)
   openssl x509 -req -in "${temporary}/runner-server.csr" \
-    -CA "${temporary}/runner-ca.pem" -CAkey "${temporary}/runner-ca.key" \
-    -set_serial "0x${serial}" -days 30 -extfile "${temporary}/server.ext" \
-    -out "${temporary}/runner-server.pem" 2>/dev/null
+    -CA "${directory}/runner-ca.pem" -CAkey "${directory}/runner-ca.key" \
+    -set_serial "0x${serial}" -days "$RUNNER_SERVER_CERTIFICATE_DAYS" \
+    -extfile "${temporary}/server.ext" -out "$destination" 2>/dev/null
+  rm -rf -- "$temporary"
+}
+
+create_tls_material() {
+  local directory="${STATE_DIR}/tls" temporary name present=0 renewed
+  local -a names=(runner-ca.key runner-ca.pem runner-server.key runner-server.pem)
+  for name in "${names[@]}"; do
+    [[ -e "${directory}/${name}" || -L "${directory}/${name}" ]] && ((present += 1))
+  done
+  if ((present == ${#names[@]})); then
+    if ! openssl x509 -in "${directory}/runner-server.pem" \
+      -checkend "$RUNNER_SERVER_CERTIFICATE_RENEWAL_SECONDS" -noout >/dev/null 2>&1; then
+      renewed=$(new_temporary_file "$directory" runner-server-renewed)
+      TEMP_PATHS+=("$renewed")
+      issue_runner_server_certificate "$directory" "$renewed"
+      install_managed_file "$renewed" "${directory}/runner-server.pem"
+      rm -f -- "$renewed"
+      printf 'bootstrap: renewed runner server certificate before expiry\n'
+    fi
+    validate_tls_material
+    return
+  fi
+  ((present == 0)) || die 'partial runner TLS state found; refusing to replace credentials'
+  temporary=$(mktemp -d -- "${directory}/.bootstrap-tls.XXXXXXXX")
+  TEMP_PATHS+=("$temporary")
+  chmod 0700 -- "$temporary"
+  openssl genpkey -algorithm ED25519 -out "${temporary}/runner-ca.key" 2>/dev/null
+  openssl req -new -x509 -key "${temporary}/runner-ca.key" \
+    -out "${temporary}/runner-ca.pem" -days 3651 \
+    -subj '/CN=Runtrue local evaluation runner CA' \
+    -addext 'basicConstraints=critical,CA:TRUE,pathlen:0' \
+    -addext 'keyUsage=critical,keyCertSign,cRLSign' 2>/dev/null
+  openssl genpkey -algorithm ED25519 -out "${temporary}/runner-server.key" 2>/dev/null
+  issue_runner_server_certificate "$temporary" "${temporary}/runner-server.pem"
   for name in "${names[@]}"; do
     chmod 0600 -- "${temporary}/${name}"
     chown "${RUNTIME_UID}:${RUNTIME_GID}" -- "${temporary}/${name}"
