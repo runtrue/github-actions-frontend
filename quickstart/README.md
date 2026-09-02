@@ -41,6 +41,10 @@ name) are rejected and require an explicit migration. Existing deployments
 with a different database installation ID can preserve it with
 `RUNTRUE_INSTALLATION_ID`. Likewise, migrations must preserve the registered
 GitHub App provider identity with `RUNTRUE_GITHUB_APP_CREDENTIAL_REFERENCE`.
+The private runner CA remains stable, while quick-start renews its internal
+runner server certificate when less than 30 days remain. Newly issued server
+certificates are valid for one year, so routine installer reruns renew them
+without invalidating enrolled runner trust.
 The project name is
 derived from the install root, preventing multiple installations on one host
 from colliding.
